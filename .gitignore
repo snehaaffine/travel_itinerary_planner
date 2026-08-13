@@ -214,5 +214,17 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
+# Frontend
+node_modules/
+frontend/dist/
+frontend/.env
+
+# Backend
+backend/.venv/
+backend/.env
+
 # Streamlit
 .streamlit/secrets.toml
+
+# Travel Planner PRD (Product Requirements Document)
+travel-planner-prd.md
