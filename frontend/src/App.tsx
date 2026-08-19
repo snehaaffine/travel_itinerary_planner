@@ -1,45 +1,867 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { apiClient } from "./api/client";
+import { CalendarMonth, addMonths, isCurrentMonth } from "./components/Calendar";
+import { ItineraryDocument } from "./components/ItineraryDocument";
+import { Screen } from "./components/Screen";
+import { BUDGET_LEVELS, DIET_OPTIONS, POPULAR, TRAVEL_TYPES } from "./data";
+import type { DateRange, DestinationChoice, ItineraryContent, Step } from "./types";
 
-interface HealthStatus {
-  status: string;
-  db: string;
-  redis: string;
-}
+const CARD_W = 220;
+const CARD_GAP = 12;
 
-function App() {
-  const [health, setHealth] = useState<HealthStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
+function SearchScreen({
+  onNext,
+}: {
+  onNext: (dest: DestinationChoice) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<DestinationChoice | null>(null);
+  const [suggestions, setSuggestions] = useState<DestinationChoice[]>([]);
+  const [open, setOpen] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [carouselIdx, setCarouselIdx] = useState(0);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    apiClient<HealthStatus>("/health")
-      .then(setHealth)
-      .catch((err: Error) => setError(err.message));
+    const onDocClick = (event: MouseEvent) => {
+      if (!boxRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
   }, []);
 
+  useEffect(() => {
+    const term = query.trim();
+    if (term.length < 2) {
+      setSuggestions([]);
+      setSearching(false);
+      setSearchError(null);
+      return;
+    }
+    if (selected && term === selected.formatted) {
+      setOpen(false);
+      return;
+    }
+    setSearching(true);
+    setOpen(true);
+    const handle = setTimeout(() => {
+      apiClient<DestinationChoice[]>(`/destinations/suggest?q=${encodeURIComponent(term)}`)
+        .then((places) => {
+          setSuggestions(places);
+          setSearchError(null);
+        })
+        .catch((err: Error) => {
+          setSuggestions([]);
+          setSearchError(err.message || "Could not search destinations");
+        })
+        .finally(() => setSearching(false));
+    }, 200);
+    return () => clearTimeout(handle);
+  }, [query, selected]);
+
+  const maxIdx = Math.max(0, POPULAR.length - 1);
+
+  const scrollTo = (idx: number) => {
+    const clamped = Math.max(0, Math.min(idx, maxIdx));
+    setCarouselIdx(clamped);
+    scrollRef.current?.scrollTo({ left: clamped * (CARD_W + CARD_GAP), behavior: "smooth" });
+  };
+
+  const pickSuggestion = (place: DestinationChoice) => {
+    setSelected(place);
+    setQuery(place.formatted);
+    setSuggestions([]);
+    setOpen(false);
+  };
+
+  const choosePopular = (name: string, country: string) => {
+    const choice: DestinationChoice = {
+      name,
+      formatted: `${name}, ${country}`,
+      country,
+      place_id: "",
+      lat: 0,
+      lon: 0,
+    };
+    setSelected(choice);
+    setQuery(choice.formatted);
+    setOpen(false);
+  };
+
+  const showMenu =
+    open && query.trim().length >= 2 && !(selected && query.trim() === selected.formatted);
+
   return (
-    <main className="container">
-      <h1>Travel Itinerary Planner</h1>
-      <p>Phase 0 boilerplate — frontend shell connected to backend.</p>
+    <Screen
+      step="search"
+      title="Where would you like to travel?"
+      subtitle="Search a destination or pick from popular spots below."
+      onNext={() => selected && onNext(selected)}
+      nextLabel="Find My Dates"
+      nextDisabled={!selected}
+    >
+      <div className="relative mb-6 fade-up z-20" ref={boxRef}>
+        <span className="absolute left-4 top-5 text-lg" style={{ color: "var(--cream-muted)" }}>
+          🔍
+        </span>
+        <input
+          type="text"
+          value={query}
+          autoComplete="off"
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setSelected(null);
+            setOpen(true);
+          }}
+          onFocus={() => {
+            if (query.trim().length >= 2) setOpen(true);
+          }}
+          placeholder="Search destinations…"
+          className="w-full pl-12 pr-4 py-4 rounded-2xl text-base outline-none"
+          style={{
+            background: "var(--surface)",
+            border: selected ? "1.5px solid #333d29" : "1px solid var(--border)",
+            color: "var(--cream)",
+            fontFamily: "Outfit, sans-serif",
+            caretColor: "var(--gold)",
+          }}
+        />
+        {showMenu && (
+          <div
+            className="absolute left-0 right-0 mt-2 rounded-2xl overflow-hidden z-30"
+            style={{
+              background: "var(--surface)",
+              border: "1px solid var(--border)",
+              boxShadow: "0 12px 32px rgba(30,45,74,0.12)",
+              maxHeight: 280,
+              overflowY: "auto",
+            }}
+          >
+            {searching && (
+              <p className="px-4 py-3 text-sm" style={{ color: "var(--cream-muted)" }}>
+                Searching…
+              </p>
+            )}
+            {!searching && searchError && (
+              <p className="px-4 py-3 text-sm" style={{ color: "#991b1b" }}>
+                {searchError}
+              </p>
+            )}
+            {!searching && !searchError && suggestions.length === 0 && (
+              <p className="px-4 py-3 text-sm" style={{ color: "var(--cream-muted)" }}>
+                No matching destinations
+              </p>
+            )}
+            {!searching &&
+              suggestions.map((s) => (
+                <button
+                  key={s.place_id || s.formatted}
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => pickSuggestion(s)}
+                  className="w-full text-left px-4 py-3 text-sm"
+                  style={{
+                    color: "var(--cream)",
+                    borderBottom: "1px solid var(--border)",
+                    fontFamily: "Outfit, sans-serif",
+                  }}
+                >
+                  {s.formatted}
+                </button>
+              ))}
+          </div>
+        )}
+      </div>
 
-      {health && (
-        <section className="health-card">
-          <h2>Backend Health</h2>
-          <ul>
-            <li>Status: {health.status}</li>
-            <li>Database: {health.db}</li>
-            <li>Redis: {health.redis}</li>
-          </ul>
-        </section>
-      )}
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: "var(--cream-muted)" }}>
+          Popular Destinations
+        </p>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => scrollTo(carouselIdx - 1)}
+            disabled={carouselIdx === 0}
+            className="w-8 h-8 rounded-full"
+            style={{ background: "var(--surface)", border: "1px solid var(--border)", color: "#1e2d4a" }}
+          >
+            ←
+          </button>
+          <button
+            onClick={() => scrollTo(carouselIdx + 1)}
+            disabled={carouselIdx >= maxIdx}
+            className="w-8 h-8 rounded-full"
+            style={{ background: "#333d29", color: "#fff" }}
+          >
+            →
+          </button>
+        </div>
+      </div>
 
-      {error && (
-        <section className="error-card">
-          <p>Health check failed: {error}</p>
-        </section>
-      )}
-    </main>
+      <div
+        ref={scrollRef}
+        className="flex gap-3 overflow-x-auto pb-3"
+        style={{ scrollbarWidth: "none", marginLeft: -24, marginRight: -24, paddingLeft: 24, paddingRight: 24 }}
+      >
+        {POPULAR.map((dest) => {
+          const isSelected = selected?.name === dest.name;
+          return (
+            <button
+              key={dest.name}
+              onClick={() => choosePopular(dest.name, dest.country)}
+              className="relative overflow-hidden rounded-2xl text-left flex-shrink-0"
+              style={{
+                width: CARD_W,
+                height: 280,
+                border: isSelected ? "2px solid var(--gold)" : "2px solid transparent",
+              }}
+            >
+              <img
+                src={`https://images.unsplash.com/photo-${dest.imgId}?w=440&h=560&fit=crop&auto=format`}
+                alt={dest.name}
+                className="absolute inset-0 w-full h-full object-cover"
+              />
+              <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(10,22,40,0.9) 0%, rgba(10,22,40,0.1) 55%)" }} />
+              <div className="absolute bottom-0 left-0 p-4">
+                <span className="inline-block text-xs font-medium px-2 py-0.5 rounded-full mb-2" style={{ background: "rgba(255,252,242,0.9)", color: "#333d29" }}>
+                  {dest.tag}
+                </span>
+                <p style={{ fontFamily: "Fraunces, serif", fontSize: 20, fontWeight: 700, color: "#ffffff" }}>{dest.name}</p>
+                <p style={{ fontSize: 12, color: "rgba(255,255,255,0.7)" }}>{dest.country}</p>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </Screen>
   );
 }
 
-export default App;
+function CalendarScreen({
+  onBack,
+  onNext,
+}: {
+  onBack: () => void;
+  onNext: (dates: DateRange, skip: boolean) => void;
+}) {
+  const now = new Date();
+  const [left, setLeft] = useState({ year: now.getFullYear(), month: now.getMonth() });
+  const [rangeStart, setRangeStart] = useState<string | null>(null);
+  const [rangeEnd, setRangeEnd] = useState<string | null>(null);
+  const [skipDates, setSkipDates] = useState(false);
+  const right = addMonths(left.year, left.month, 1);
+
+  const onSelect = (iso: string) => {
+    setSkipDates(false);
+    if (!rangeStart || (rangeStart && rangeEnd)) {
+      setRangeStart(iso);
+      setRangeEnd(null);
+      return;
+    }
+    if (iso < rangeStart) {
+      setRangeEnd(rangeStart);
+      setRangeStart(iso);
+      return;
+    }
+    setRangeEnd(iso);
+  };
+
+  const canContinue = skipDates || Boolean(rangeStart && rangeEnd);
+  const dayCount =
+    rangeStart && rangeEnd
+      ? Math.round((new Date(rangeEnd).getTime() - new Date(rangeStart).getTime()) / 86400000) + 1
+      : 0;
+
+  return (
+    <Screen
+      step="calendar"
+      title="When are you travelling?"
+      subtitle="Pick your travel dates or choose to stay flexible."
+      onBack={onBack}
+      onNext={() =>
+        onNext(skipDates || !rangeStart || !rangeEnd ? null : { start: rangeStart, end: rangeEnd }, skipDates)
+      }
+      nextLabel={skipDates ? "I'll decide later" : dayCount > 0 ? `Continue with ${dayCount} day${dayCount > 1 ? "s" : ""}` : "Continue"}
+      nextDisabled={!canContinue}
+      wide
+    >
+      <div className="flex items-center justify-between mb-4">
+        <button
+          onClick={() => setLeft(addMonths(left.year, left.month, -1))}
+          disabled={isCurrentMonth(left.year, left.month)}
+          className="w-10 h-10 rounded-full"
+          style={{
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            color: isCurrentMonth(left.year, left.month) ? "rgba(30,45,74,0.25)" : "#333d29",
+          }}
+        >
+          ←
+        </button>
+        <p className="text-xs uppercase tracking-widest" style={{ color: "var(--cream-muted)" }}>
+          Upcoming months
+        </p>
+        <button
+          onClick={() => setLeft(addMonths(left.year, left.month, 1))}
+          className="w-10 h-10 rounded-full"
+          style={{ background: "#333d29", color: "#fff" }}
+        >
+          →
+        </button>
+      </div>
+      <div className="grid grid-cols-2 gap-4 fade-up">
+        <CalendarMonth year={left.year} month={left.month} rangeStart={rangeStart} rangeEnd={rangeEnd} onSelect={onSelect} />
+        <CalendarMonth year={right.year} month={right.month} rangeStart={rangeStart} rangeEnd={rangeEnd} onSelect={onSelect} />
+      </div>
+      <button
+        onClick={() => {
+          setSkipDates(!skipDates);
+          setRangeStart(null);
+          setRangeEnd(null);
+        }}
+        className="flex items-center gap-3 p-4 rounded-2xl mt-4 w-full"
+        style={{
+          background: skipDates ? "rgba(51,61,41,0.12)" : "var(--surface)",
+          border: skipDates ? "1px solid #333d29" : "1px solid var(--border)",
+        }}
+      >
+        <div
+          className="w-5 h-5 rounded flex items-center justify-center"
+          style={{ background: skipDates ? "#333d29" : "transparent", border: skipDates ? "none" : "1.5px solid rgba(30,45,74,0.3)" }}
+        >
+          {skipDates && <span className="text-white text-xs font-bold">✓</span>}
+        </div>
+        <div className="text-left">
+          <p className="text-sm font-semibold">I don't have dates yet</p>
+          <p className="text-xs" style={{ color: "var(--cream-muted)" }}>
+            Stay flexible — we'll help you plan later
+          </p>
+        </div>
+      </button>
+    </Screen>
+  );
+}
+
+function TravelTypeScreen({
+  onBack,
+  onNext,
+}: {
+  onBack: () => void;
+  onNext: (tripType: string, pets: boolean) => void;
+}) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const [pets, setPets] = useState(false);
+  return (
+    <Screen
+      step="travelType"
+      title="Kind of travel?"
+      subtitle="How you travel shapes everything. Tell us your vibe."
+      onBack={onBack}
+      onNext={() => selected && onNext(selected, pets)}
+      nextLabel="Set My Interests"
+      nextDisabled={!selected}
+    >
+      <div className="grid grid-cols-2 gap-3 fade-up">
+        {TRAVEL_TYPES.map((t) => {
+          const isSelected = selected === t.id;
+          return (
+            <button
+              key={t.id}
+              onClick={() => setSelected(t.id)}
+              className="flex flex-col items-center justify-center gap-3 p-6 rounded-2xl"
+              style={{
+                background: isSelected ? "rgba(51,61,41,0.12)" : "var(--surface)",
+                border: isSelected ? "2px solid #333d29" : "2px solid var(--border)",
+              }}
+            >
+              <span style={{ fontSize: 38 }}>{t.icon}</span>
+              <p style={{ fontFamily: "Fraunces, serif", fontSize: 18, fontWeight: 700, color: isSelected ? "#333d29" : "var(--cream)" }}>
+                {t.label}
+              </p>
+              <p style={{ fontSize: 12, color: "var(--cream-muted)" }}>{t.desc}</p>
+            </button>
+          );
+        })}
+      </div>
+      <button
+        onClick={() => setPets((v) => !v)}
+        className="flex items-center gap-3 p-4 rounded-2xl mt-4 w-full"
+        style={{
+          background: pets ? "rgba(51,61,41,0.12)" : "var(--surface)",
+          border: pets ? "1px solid #333d29" : "1px solid var(--border)",
+        }}
+      >
+        <span>🐾</span>
+        <div className="text-left">
+          <p className="text-sm font-semibold">Traveling with pets</p>
+          <p className="text-xs" style={{ color: "var(--cream-muted)" }}>
+            We'll prefer pet-friendly places
+          </p>
+        </div>
+      </button>
+    </Screen>
+  );
+}
+
+function formatInterestLabel(raw: string): string | null {
+  const words = raw
+    .replace(/\band\b/gi, " ")
+    .replace(/[&/,+|]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
+  return words.length ? words.join(" ") : null;
+}
+
+function InterestsScreen({
+  tags,
+  loading,
+  onBack,
+  onNext,
+}: {
+  tags: string[];
+  loading: boolean;
+  onBack: () => void;
+  onNext: (interests: string[]) => void;
+}) {
+  const [localTags, setLocalTags] = useState<string[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [adding, setAdding] = useState(false);
+  const [inputVal, setInputVal] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setLocalTags(tags);
+  }, [tags]);
+
+  useEffect(() => {
+    if (adding) inputRef.current?.focus();
+  }, [adding]);
+
+  const toggle = (tag: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(tag) ? next.delete(tag) : next.add(tag);
+      return next;
+    });
+  };
+
+  const addCustom = () => {
+    const label = formatInterestLabel(inputVal);
+    const exists = localTags.some((tag) => tag.toLowerCase() === label?.toLowerCase());
+    if (label && !exists) {
+      setLocalTags((prev) => [...prev, label]);
+      setSelected((prev) => new Set([...prev, label]));
+    }
+    setInputVal("");
+    setAdding(false);
+  };
+
+  const count = selected.size;
+
+  return (
+    <Screen
+      step="interests"
+      title="What are your interests?"
+      subtitle="Pick what fits this destination — chips stay short and unique."
+      onBack={onBack}
+      onNext={() => onNext([...selected])}
+      nextLabel={count > 0 ? `Choose budget · ${count}` : "Skip for now"}
+    >
+      {loading && localTags.length === 0 && (
+        <p className="fade-up mb-4" style={{ color: "var(--cream-muted)" }}>
+          Matching interests to this place…
+        </p>
+      )}
+      <div className="flex flex-wrap gap-2.5 fade-up">
+        {localTags.map((tag) => {
+          const isSelected = selected.has(tag);
+          return (
+            <button
+              key={tag}
+              onClick={() => toggle(tag)}
+              className="px-4 py-2 rounded-full text-sm font-medium"
+              style={{
+                background: isSelected ? "#333d29" : "var(--surface)",
+                color: isSelected ? "#ffffff" : "var(--cream)",
+                border: isSelected ? "1.5px solid #333d29" : "1.5px solid var(--border)",
+              }}
+            >
+              {tag}
+            </button>
+          );
+        })}
+        {adding ? (
+          <div className="flex items-center gap-2">
+            <input
+              ref={inputRef}
+              value={inputVal}
+              onChange={(e) => setInputVal(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") addCustom();
+                if (e.key === "Escape") setAdding(false);
+              }}
+              placeholder="Type interest…"
+              className="px-4 py-2 rounded-full text-sm outline-none"
+              style={{ background: "var(--surface2)", border: "1.5px solid #333d29", color: "var(--cream)", width: 150 }}
+            />
+            <button onClick={addCustom} className="px-3 py-2 rounded-full text-sm font-semibold" style={{ background: "#333d29", color: "#fff" }}>
+              Add
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setAdding(true)}
+            className="px-4 py-2 rounded-full text-sm font-medium"
+            style={{ color: "#333d29", border: "1.5px dashed #333d29" }}
+          >
+            Add interests +
+          </button>
+        )}
+      </div>
+    </Screen>
+  );
+}
+
+function BudgetScreen({
+  onBack,
+  onNext,
+}: {
+  onBack: () => void;
+  onNext: (budget: string, diets: string[]) => void;
+}) {
+  const [budget, setBudget] = useState<string | null>(null);
+  const [diets, setDiets] = useState<Set<string>>(new Set());
+
+  const toggleDiet = (tag: string) => {
+    setDiets((prev) => {
+      const next = new Set(prev);
+      next.has(tag) ? next.delete(tag) : next.add(tag);
+      return next;
+    });
+  };
+
+  return (
+    <Screen
+      step="budget"
+      title="Budget and diet?"
+      subtitle="We'll keep the plan in range and skip food that doesn't work for you."
+      onBack={onBack}
+      onNext={() => budget && onNext(budget, [...diets])}
+      nextLabel="Build itinerary"
+      nextDisabled={!budget}
+    >
+      <div className="grid grid-cols-2 gap-3 fade-up">
+        {BUDGET_LEVELS.map((level) => {
+          const isSelected = budget === level.id;
+          return (
+            <button
+              key={level.id}
+              type="button"
+              onClick={() => setBudget(level.id)}
+              className="flex flex-col items-center justify-center gap-2 p-5 rounded-2xl"
+              style={{
+                background: isSelected ? "rgba(51,61,41,0.12)" : "var(--surface)",
+                border: isSelected ? "2px solid #333d29" : "2px solid var(--border)",
+              }}
+            >
+              <span style={{ fontSize: 28 }}>{level.icon}</span>
+              <p
+                style={{
+                  fontFamily: "Fraunces, serif",
+                  fontSize: 16,
+                  fontWeight: 700,
+                  color: isSelected ? "#333d29" : "var(--cream)",
+                }}
+              >
+                {level.label}
+              </p>
+              <p style={{ fontSize: 12, color: "var(--cream-muted)", textAlign: "center" }}>{level.desc}</p>
+            </button>
+          );
+        })}
+      </div>
+      <p
+        className="text-xs font-semibold uppercase tracking-widest mt-6 mb-3"
+        style={{ color: "var(--cream-muted)" }}
+      >
+        Diet constraints
+      </p>
+      <div className="flex flex-wrap gap-2.5">
+        {DIET_OPTIONS.map((tag) => {
+          const isSelected = diets.has(tag);
+          return (
+            <button
+              key={tag}
+              type="button"
+              onClick={() => toggleDiet(tag)}
+              className="px-4 py-2 rounded-full text-sm font-medium"
+              style={{
+                background: isSelected ? "#333d29" : "var(--surface)",
+                color: isSelected ? "#ffffff" : "var(--cream)",
+                border: isSelected ? "1.5px solid #333d29" : "1.5px solid var(--border)",
+              }}
+            >
+              {tag}
+            </button>
+          );
+        })}
+      </div>
+      <p className="text-xs mt-3" style={{ color: "var(--cream-muted)" }}>
+        Leave blank if you have no restrictions.
+      </p>
+    </Screen>
+  );
+}
+
+function ItineraryScreen({
+  content,
+  error,
+  loading,
+  destination,
+  onNext,
+  onBack,
+}: {
+  content: ItineraryContent | null;
+  error: string | null;
+  loading: boolean;
+  destination: DestinationChoice | null;
+  onNext: () => void;
+  onBack: () => void;
+}) {
+  const failed = Boolean(error) && !loading && !content;
+  return (
+    <Screen
+      step="itinerary"
+      title={loading ? "Crafting your days…" : failed ? "Almost there" : "Your itinerary"}
+      subtitle={
+        loading
+          ? "Checking weather and places for your trip."
+          : failed
+            ? "Something went wrong while building the plan."
+            : "This plan is final — no edits or regenerates."
+      }
+      onBack={failed ? onBack : undefined}
+      onNext={content ? onNext : undefined}
+      nextLabel="Share feedback"
+      nextDisabled={!content}
+      wide
+    >
+      {loading && (
+        <p className="fade-up" style={{ color: "var(--cream-muted)" }}>
+          This can take a minute.
+        </p>
+      )}
+      {failed && (
+        <p className="fade-up" style={{ color: "var(--cream-muted)" }}>
+          We couldn't put this trip together just now. Go back and try again.
+        </p>
+      )}
+      {content && <ItineraryDocument content={content} destination={destination} />}
+    </Screen>
+  );
+}
+
+function FeedbackScreen({ onSubmit }: { onSubmit: (rating: number, comment: string) => Promise<void> }) {
+  const [rating, setRating] = useState(0);
+  const [comment, setComment] = useState("");
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (done) {
+    return (
+      <Screen step="feedback" title="Thank you." subtitle="Your notes help us improve the next trip.">
+        <p className="fade-up" style={{ color: "var(--cream-muted)" }}>
+          Safe travels.
+        </p>
+      </Screen>
+    );
+  }
+
+  return (
+    <Screen
+      step="feedback"
+      title="How was this plan?"
+      subtitle="A rating is enough. A comment is optional."
+      onNext={async () => {
+        try {
+          await onSubmit(rating, comment);
+          setDone(true);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Could not save feedback");
+        }
+      }}
+      nextLabel="Submit"
+      nextDisabled={rating < 1}
+    >
+      <div className="flex gap-2 mb-4">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button
+            key={n}
+            onClick={() => setRating(n)}
+            className="w-12 h-12 rounded-xl font-semibold"
+            style={{
+              background: rating >= n ? "#333d29" : "var(--surface)",
+              color: rating >= n ? "#fff" : "var(--cream)",
+              border: "1px solid var(--border)",
+            }}
+          >
+            {n}
+          </button>
+        ))}
+      </div>
+      <textarea
+        value={comment}
+        onChange={(e) => setComment(e.target.value)}
+        placeholder="Anything we should know? (optional)"
+        className="w-full rounded-2xl p-4 outline-none min-h-28"
+        style={{ background: "var(--surface)", border: "1px solid var(--border)", color: "var(--cream)" }}
+      />
+      {error && <p className="text-sm mt-3" style={{ color: "#991b1b" }}>{error}</p>}
+    </Screen>
+  );
+}
+
+export default function App() {
+  const [step, setStep] = useState<Step>("search");
+  const [destination, setDestination] = useState<DestinationChoice | null>(null);
+  const [tripType, setTripType] = useState<string | null>(null);
+  const [pets, setPets] = useState(false);
+  const [interests, setInterests] = useState<string[]>([]);
+  const [interestTags, setInterestTags] = useState<string[]>([]);
+  const [interestTagsLoading, setInterestTagsLoading] = useState(false);
+  const [itinerary, setItinerary] = useState<ItineraryContent | null>(null);
+  const [genError, setGenError] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
+
+  useEffect(() => {
+    if (!destination) {
+      setInterestTags([]);
+      return;
+    }
+    let cancelled = false;
+    setInterestTagsLoading(true);
+    apiClient<{ tags: string[] }>(
+      `/template/interests?destination=${encodeURIComponent(destination.formatted)}`,
+    )
+      .then((data) => {
+        if (!cancelled) setInterestTags(data.tags);
+      })
+      .catch(() => {
+        if (!cancelled) setInterestTags([]);
+      })
+      .finally(() => {
+        if (!cancelled) setInterestTagsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [destination]);
+
+  const createTrip = async (nextDates: DateRange, skipped: boolean) => {
+    if (!destination) return;
+    await apiClient("/trip", {
+      method: "POST",
+      body: JSON.stringify({
+        destination: destination.formatted,
+        place_id: destination.place_id || undefined,
+        lat: destination.lat || undefined,
+        lon: destination.lon || undefined,
+        dates: skipped ? null : nextDates,
+      }),
+    });
+  };
+
+  const generate = async (budget: string, diets: string[]) => {
+    setGenerating(true);
+    setGenError(null);
+    setStep("itinerary");
+    try {
+      await apiClient("/template", {
+        method: "POST",
+        body: JSON.stringify({ trip_type: tripType, pets, interests, budget, diets }),
+      });
+      const result = await apiClient<{ content: ItineraryContent }>("/itinerary", { method: "POST" });
+      setItinerary(result.content);
+    } catch {
+      setGenError("failed");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  return (
+    <div style={{ maxWidth: step === "calendar" || step === "itinerary" ? 920 : 480, margin: "0 auto", minHeight: "100vh" }}>
+      {step === "search" && (
+        <SearchScreen
+          onNext={(dest) => {
+            setDestination(dest);
+            setStep("calendar");
+          }}
+        />
+      )}
+      {step === "calendar" && (
+        <CalendarScreen
+          onBack={() => setStep("search")}
+          onNext={async (nextDates, skipped) => {
+            await createTrip(nextDates, skipped);
+            setStep("travelType");
+          }}
+        />
+      )}
+      {step === "travelType" && (
+        <TravelTypeScreen
+          onBack={() => setStep("calendar")}
+          onNext={(type, withPets) => {
+            setTripType(type);
+            setPets(withPets);
+            setStep("interests");
+          }}
+        />
+      )}
+      {step === "interests" && destination && (
+        <InterestsScreen
+          tags={interestTags}
+          loading={interestTagsLoading}
+          onBack={() => setStep("travelType")}
+          onNext={(picked) => {
+            setInterests(picked);
+            setStep("budget");
+          }}
+        />
+      )}
+      {step === "budget" && (
+        <BudgetScreen
+          onBack={() => setStep("interests")}
+          onNext={generate}
+        />
+      )}
+      {step === "itinerary" && (
+        <ItineraryScreen
+          content={itinerary}
+          error={genError}
+          loading={generating}
+          destination={destination}
+          onNext={() => setStep("feedback")}
+          onBack={() => {
+            setGenError(null);
+            setStep("budget");
+          }}
+        />
+      )}
+      {step === "feedback" && (
+        <FeedbackScreen
+          onSubmit={async (rating, comment) => {
+            await apiClient("/feedback", {
+              method: "POST",
+              body: JSON.stringify({ rating, comment: comment || null }),
+            });
+          }}
+        />
+      )}
+    </div>
+  );
+}

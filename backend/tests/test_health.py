@@ -15,9 +15,20 @@ def test_health_endpoint_returns_200():
 
 
 def test_app_token_required_for_non_exempt_paths():
-  # /trip is not implemented yet (Phase 1), but it is not token-exempt.
-  response = client.get("/trip")
+  response = client.get("/destinations/suggest")
   assert response.status_code == 401
 
-  response = client.get("/trip", headers={"X-App-Token": "dev-app-token"})
-  assert response.status_code == 404
+  response = client.get("/destinations/suggest", headers={"X-App-Token": "dev-app-token"})
+  assert response.status_code == 422
+
+
+def test_options_preflight_is_not_blocked_by_app_token():
+  response = client.options(
+    "/destinations/suggest",
+    headers={
+      "Origin": "http://localhost:5173",
+      "Access-Control-Request-Method": "GET",
+      "Access-Control-Request-Headers": "x-app-token",
+    },
+  )
+  assert response.status_code in {200, 204}
