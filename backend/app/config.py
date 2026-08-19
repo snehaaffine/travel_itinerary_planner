@@ -1,5 +1,4 @@
 from enum import Enum
-from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -27,7 +26,7 @@ class Settings(BaseSettings):
     session_secret: str = "dev-session-secret-change-in-production"
     session_cookie_name: str = "trip_session"
     session_cookie_secure: bool = False
-    cors_origins: str = "http://localhost:5173"
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     # LLM
     llm_provider: LLMProvider = LLMProvider.ANTHROPIC
@@ -37,9 +36,10 @@ class Settings(BaseSettings):
     nvidia_model: str = "nvidia/nemotron-3-ultra-550b-a55b"
     nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
     nvidia_timeout_seconds: float = 300.0
+    nvidia_max_tokens: int = 8192
 
     # External APIs (wired for later phases)
-    google_places_api_key: str | None = None
+    geoapify_api_key: str | None = None
     tavily_api_key: str | None = None
     cambai_api_key: str | None = None
     gemini_api_key: str | None = None

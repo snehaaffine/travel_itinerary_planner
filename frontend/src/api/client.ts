@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 const APP_API_TOKEN = import.meta.env.VITE_APP_API_TOKEN || "dev-app-token";
 
 export async function apiClient<T>(

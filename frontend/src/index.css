@@ -1,8 +1,17 @@
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700;9..144,800&family=Outfit:wght@300;400;500;600;700&display=swap");
+@import "tailwindcss";
+
 :root {
-  font-family: system-ui, -apple-system, sans-serif;
-  line-height: 1.5;
-  color: #1a1a1a;
-  background-color: #f5f5f5;
+  --bg: #fffcf2;
+  --surface: #fdf8ee;
+  --surface2: #ede8da;
+  --cream: #1e2d4a;
+  --cream-muted: #6b7585;
+  --gold: #333d29;
+  --gold-light: #4a5a3a;
+  --coral: #c4623a;
+  --teal: #333d29;
+  --border: rgba(30, 45, 74, 0.12);
 }
 
 * {
@@ -11,35 +20,33 @@
 
 body {
   margin: 0;
+  background: var(--bg);
+  color: var(--cream);
+  font-family: "Outfit", sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
-.container {
-  max-width: 640px;
-  margin: 2rem auto;
-  padding: 2rem;
-  background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(30, 45, 74, 0.2);
+  border-radius: 2px;
 }
 
-.health-card,
-.error-card {
-  margin-top: 1.5rem;
-  padding: 1rem;
-  border-radius: 6px;
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
-
-.health-card {
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
-}
-
-.error-card {
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  color: #991b1b;
-}
-
-ul {
-  padding-left: 1.25rem;
+.fade-up {
+  animation: fadeUp 0.5s ease both;
 }

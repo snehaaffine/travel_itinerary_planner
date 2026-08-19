@@ -78,7 +78,7 @@ The app runs at `http://localhost:5173`.
 | `LLM_PROVIDER` | `anthropic` or `nvidia` |
 | `ANTHROPIC_API_KEY` | Anthropic API key |
 | `NVIDIA_API_KEY` | NVIDIA API key (Nemotron evaluation) |
-| `GOOGLE_PLACES_API_KEY` | Google Places (geocoding + POI) |
+| `GEOAPIFY_API_KEY` | Geoapify (geocoding + POI) |
 | `TAVILY_API_KEY` | Tavily search fallback |
 | `GEMINI_API_KEY` | Gemini image generation (Phase 3) |
 | `CAMBAI_API_KEY` | Cambai TTS (Phase 4) |

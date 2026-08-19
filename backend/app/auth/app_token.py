@@ -12,7 +12,7 @@ class AppTokenMiddleware(BaseHTTPMiddleware):
   async def dispatch(
     self, request: Request, call_next: RequestResponseEndpoint
   ) -> Response:
-    if request.url.path in EXEMPT_PATHS:
+    if request.method == "OPTIONS" or request.url.path in EXEMPT_PATHS:
       return await call_next(request)
 
     settings = get_settings()

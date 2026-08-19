@@ -81,6 +81,7 @@ class NvidiaChatModel(BaseChatModel):
   api_key: str | None
   base_url: str
   timeout_seconds: float
+  max_tokens: int
 
   def __init__(self, settings: Settings) -> None:
     super().__init__(
@@ -88,11 +89,18 @@ class NvidiaChatModel(BaseChatModel):
       api_key=settings.nvidia_api_key,
       base_url=settings.nvidia_base_url,
       timeout_seconds=settings.nvidia_timeout_seconds,
+      max_tokens=settings.nvidia_max_tokens,
     )
 
   @property
   def _llm_type(self) -> str:
     return "nvidia-nemotron"
+
+  def bind_tools(self, tools: list[Any], **kwargs: Any) -> Any:
+    from langchain_core.utils.function_calling import convert_to_openai_tool
+
+    formatted = [convert_to_openai_tool(tool) for tool in tools]
+    return self.bind(tools=formatted, **kwargs)
 
   def _generate(
     self,
@@ -107,7 +115,7 @@ class NvidiaChatModel(BaseChatModel):
     payload: dict[str, Any] = {
       "model": self.model,
       "messages": [_message_to_api_format(message) for message in messages],
-      "max_tokens": kwargs.get("max_tokens", 1024),
+      "max_tokens": kwargs.get("max_tokens", self.max_tokens),
     }
 
     if "tools" in kwargs:
