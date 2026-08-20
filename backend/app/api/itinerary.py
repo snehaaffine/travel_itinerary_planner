@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import object_session
 
@@ -10,6 +12,7 @@ from app.services.itinerary import (
     create_itinerary,
 )
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -33,6 +36,12 @@ def generate_itinerary(request: Request, trip: TripState = Depends(get_current_t
             code = status.HTTP_400_BAD_REQUEST
         else:
             code = status.HTTP_502_BAD_GATEWAY
+            cause = exc.__cause__
+            logger.exception(
+                "Itinerary generation failed: %s%s",
+                message,
+                f" (cause: {cause})" if cause else "",
+            )
             message = USER_GENERATION_ERROR
         raise HTTPException(status_code=code, detail=message) from exc
     return {"id": str(itinerary.id), "content": itinerary.content}

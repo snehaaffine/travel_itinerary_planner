@@ -359,7 +359,7 @@ function TravelTypeScreen({
       subtitle="How you travel shapes everything. Tell us your vibe."
       onBack={onBack}
       onNext={() => selected && onNext(selected, pets)}
-      nextLabel="Set My Interests"
+      nextLabel="Set My Budget"
       nextDisabled={!selected}
     >
       <div className="grid grid-cols-2 gap-3 fade-up">
@@ -416,14 +416,21 @@ function formatInterestLabel(raw: string): string | null {
   return words.length ? words.join(" ") : null;
 }
 
+function isFineDining(tag: string): boolean {
+  const key = tag.trim().toLowerCase();
+  return key === "fine dining" || key === "fine dine" || key === "luxury dining" || key === "haute cuisine";
+}
+
 function InterestsScreen({
   tags,
   loading,
+  allowFineDining,
   onBack,
   onNext,
 }: {
   tags: string[];
   loading: boolean;
+  allowFineDining: boolean;
   onBack: () => void;
   onNext: (interests: string[]) => void;
 }) {
@@ -434,14 +441,20 @@ function InterestsScreen({
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    setLocalTags(tags);
-  }, [tags]);
+    const nextTags = allowFineDining ? tags : tags.filter((tag) => !isFineDining(tag));
+    setLocalTags(nextTags);
+    setSelected((prev) => {
+      const next = new Set([...prev].filter((tag) => nextTags.includes(tag) && (allowFineDining || !isFineDining(tag))));
+      return next;
+    });
+  }, [tags, allowFineDining]);
 
   useEffect(() => {
     if (adding) inputRef.current?.focus();
   }, [adding]);
 
   const toggle = (tag: string) => {
+    if (!allowFineDining && isFineDining(tag)) return;
     setSelected((prev) => {
       const next = new Set(prev);
       next.has(tag) ? next.delete(tag) : next.add(tag);
@@ -451,8 +464,13 @@ function InterestsScreen({
 
   const addCustom = () => {
     const label = formatInterestLabel(inputVal);
-    const exists = localTags.some((tag) => tag.toLowerCase() === label?.toLowerCase());
-    if (label && !exists) {
+    if (!label || (!allowFineDining && isFineDining(label))) {
+      setInputVal("");
+      setAdding(false);
+      return;
+    }
+    const exists = localTags.some((tag) => tag.toLowerCase() === label.toLowerCase());
+    if (!exists) {
       setLocalTags((prev) => [...prev, label]);
       setSelected((prev) => new Set([...prev, label]));
     }
@@ -466,10 +484,10 @@ function InterestsScreen({
     <Screen
       step="interests"
       title="What are your interests?"
-      subtitle="Pick what fits this destination — chips stay short and unique."
+      subtitle="Pick what fits this destination and budget — chips stay short and unique."
       onBack={onBack}
       onNext={() => onNext([...selected])}
-      nextLabel={count > 0 ? `Choose budget · ${count}` : "Skip for now"}
+      nextLabel={count > 0 ? `Build itinerary · ${count}` : "Skip for now"}
     >
       {loading && localTags.length === 0 && (
         <p className="fade-up mb-4" style={{ color: "var(--cream-muted)" }}>
@@ -551,7 +569,7 @@ function BudgetScreen({
       subtitle="We'll keep the plan in range and skip food that doesn't work for you."
       onBack={onBack}
       onNext={() => budget && onNext(budget, [...diets])}
-      nextLabel="Build itinerary"
+      nextLabel="Set My Interests"
       nextDisabled={!budget}
     >
       <div className="grid grid-cols-2 gap-3 fade-up">
@@ -636,7 +654,7 @@ function ItineraryScreen({
   return (
     <Screen
       step="itinerary"
-      title={loading ? "Crafting your days…" : failed ? "Almost there" : "Your itinerary"}
+      title={loading ? "Crafting your days…" : failed ? "Almost there" : "Your Itinerary"}
       subtitle={
         loading
           ? "Checking weather and places for your trip."
@@ -730,7 +748,8 @@ export default function App() {
   const [destination, setDestination] = useState<DestinationChoice | null>(null);
   const [tripType, setTripType] = useState<string | null>(null);
   const [pets, setPets] = useState(false);
-  const [interests, setInterests] = useState<string[]>([]);
+  const [budget, setBudget] = useState<string | null>(null);
+  const [diets, setDiets] = useState<string[]>([]);
   const [interestTags, setInterestTags] = useState<string[]>([]);
   const [interestTagsLoading, setInterestTagsLoading] = useState(false);
   const [itinerary, setItinerary] = useState<ItineraryContent | null>(null);
@@ -738,15 +757,17 @@ export default function App() {
   const [generating, setGenerating] = useState(false);
 
   useEffect(() => {
-    if (!destination) {
+    if (!destination || !budget) {
       setInterestTags([]);
       return;
     }
     let cancelled = false;
     setInterestTagsLoading(true);
-    apiClient<{ tags: string[] }>(
-      `/template/interests?destination=${encodeURIComponent(destination.formatted)}`,
-    )
+    const params = new URLSearchParams({
+      destination: destination.formatted,
+      budget,
+    });
+    apiClient<{ tags: string[] }>(`/template/interests?${params.toString()}`)
       .then((data) => {
         if (!cancelled) setInterestTags(data.tags);
       })
@@ -759,7 +780,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [destination]);
+  }, [destination, budget]);
 
   const createTrip = async (nextDates: DateRange, skipped: boolean) => {
     if (!destination) return;
@@ -775,14 +796,15 @@ export default function App() {
     });
   };
 
-  const generate = async (budget: string, diets: string[]) => {
+  const generate = async (picked: string[]) => {
+    if (!budget) return;
     setGenerating(true);
     setGenError(null);
     setStep("itinerary");
     try {
       await apiClient("/template", {
         method: "POST",
-        body: JSON.stringify({ trip_type: tripType, pets, interests, budget, diets }),
+        body: JSON.stringify({ trip_type: tripType, pets, interests: picked, budget, diets }),
       });
       const result = await apiClient<{ content: ItineraryContent }>("/itinerary", { method: "POST" });
       setItinerary(result.content);
@@ -818,6 +840,16 @@ export default function App() {
           onNext={(type, withPets) => {
             setTripType(type);
             setPets(withPets);
+            setStep("budget");
+          }}
+        />
+      )}
+      {step === "budget" && (
+        <BudgetScreen
+          onBack={() => setStep("travelType")}
+          onNext={(nextBudget, nextDiets) => {
+            setBudget(nextBudget);
+            setDiets(nextDiets);
             setStep("interests");
           }}
         />
@@ -826,16 +858,8 @@ export default function App() {
         <InterestsScreen
           tags={interestTags}
           loading={interestTagsLoading}
-          onBack={() => setStep("travelType")}
-          onNext={(picked) => {
-            setInterests(picked);
-            setStep("budget");
-          }}
-        />
-      )}
-      {step === "budget" && (
-        <BudgetScreen
-          onBack={() => setStep("interests")}
+          allowFineDining={budget === "Comfortable" || budget === "Luxury"}
+          onBack={() => setStep("budget")}
           onNext={generate}
         />
       )}
@@ -848,7 +872,7 @@ export default function App() {
           onNext={() => setStep("feedback")}
           onBack={() => {
             setGenError(null);
-            setStep("budget");
+            setStep("interests");
           }}
         />
       )}

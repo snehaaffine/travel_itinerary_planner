@@ -5,6 +5,7 @@ from app.db.models import TripState
 from app.services.geoapify import _result_to_place, categories_for_interests
 from app.services.interests import (
     format_interest_label,
+    interest_sentence,
     interests_for_destination,
     unique_interest_tags,
 )
@@ -76,6 +77,28 @@ def test_interests_for_destination_filters_general_tags():
             assert tag == format_interest_label(tag)
 
     assert set(STATIC_INTERESTS) - set(paris)
+
+
+def test_fine_dining_hidden_on_budget_friendly_and_moderate():
+    luxury = interests_for_destination("Paris, France", "Luxury")
+    comfortable = interests_for_destination("Paris, France", "Comfortable")
+    modest = interests_for_destination("Paris, France", "Budget-friendly")
+    moderate = interests_for_destination("Paris, France", "Moderate")
+    assert "Fine Dining" in luxury
+    assert "Fine Dining" in comfortable
+    assert "Fine Dining" not in modest
+    assert "Fine Dining" not in moderate
+    assert len(modest) >= 8
+    assert len(moderate) >= 8
+
+
+def test_interest_sentence_names_every_selected_tag():
+    sentence = interest_sentence("Paris, France", ["Street Food", "Museums", "Cafes"])
+    assert sentence.startswith("This Paris plan")
+    assert "street food" in sentence
+    assert "museums" in sentence
+    assert "cafes" in sentence
+    assert sentence.count(".") == 1
 
 
 def test_day_count_from_range_and_flexible():

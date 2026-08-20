@@ -23,6 +23,7 @@ from app.llm.provider import get_llm_client
 from app.services.agents import AgentError, message_text, run_specialist, run_tool_agent
 from app.services.geo_store import cache_places, cache_trip_geo, get_cached_places, get_trip_geo
 from app.services.geoapify import GeoapifyError, geocode_destination, search_places
+from app.services.interests import interest_sentence
 from app.services.weather import fetch_weather
 
 
@@ -70,7 +71,7 @@ Rules:
 - Honor diet constraints in meals and food-related stops
 - Use real POI names from poi_agent in location and dining venues
 - Match the requested number of days
-- Include breakfast, lunch, and dinner in meals when food is relevant
+- Only include a meal when poi_agent gave a real venue name; omit meals with no place
 """
 
 
@@ -264,6 +265,13 @@ def _extract_json(text: str) -> dict[str, Any]:
     return _normalize_itinerary(parsed)
 
 
+def _has_meal_venue(meal: dict[str, Any]) -> bool:
+    venue = str(meal.get("venue") or "").strip()
+    if not venue:
+        return False
+    return venue.lower() not in {"n/a", "na", "none", "tbd", "unknown", "-", "—"}
+
+
 def _normalize_itinerary(parsed: dict[str, Any]) -> dict[str, Any]:
     days = parsed.get("days")
     if not isinstance(days, list):
@@ -283,6 +291,15 @@ def _normalize_itinerary(parsed: dict[str, Any]) -> dict[str, Any]:
             trimmed.append(item)
         day["activities"] = trimmed
         day.pop("items", None)
+        meals = day.get("meals")
+        if isinstance(meals, list):
+            day["meals"] = [
+                meal
+                for meal in meals
+                if isinstance(meal, dict) and _has_meal_venue(meal)
+            ]
+        else:
+            day.pop("meals", None)
     return parsed
 
 
@@ -308,7 +325,7 @@ def generate_itinerary_content(
         raise ItineraryError("Itinerary generation did not complete") from exc
 
     try:
-        return _extract_json(run.text)
+        parsed = _extract_json(run.text)
     except ItineraryError:
         run.messages.append(
             HumanMessage(
@@ -319,7 +336,9 @@ def generate_itinerary_content(
             )
         )
         retry = run.llm.invoke(run.messages)
-        return _extract_json(message_text(retry.content))
+        parsed = _extract_json(message_text(retry.content))
+    parsed["interestSummary"] = interest_sentence(trip.destination, trip.interests)
+    return parsed
 
 
 def check_rate_limit(trip_id: UUID, client_ip: str) -> bool:
