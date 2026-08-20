@@ -6,19 +6,18 @@ function ProgressBar({ step }: { step: Step }) {
   const idx = Math.max(0, STEPS.indexOf(step as (typeof STEPS)[number]));
   const activeIdx = step === "feedback" ? STEPS.length - 1 : idx;
   return (
-    <div className="flex items-center gap-1 justify-center mb-8">
+    <div className="flex items-center justify-center mb-8" style={{ gap: 15 }}>
       {STEPS.map((s, i) => (
-        <div key={s} className="flex items-center gap-1">
-          <div
-            className="transition-all duration-300"
-            style={{
-              width: i <= activeIdx ? 28 : 8,
-              height: 8,
-              borderRadius: 4,
-              background: i < activeIdx ? "#333d29" : i === activeIdx ? "#333d29" : "rgba(30,45,74,0.18)",
-            }}
-          />
-        </div>
+        <div
+          key={s}
+          className="transition-all duration-300"
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: "50%",
+            background: i <= activeIdx ? "#f5edd8" : "rgba(30,45,74,0.12)",
+          }}
+        />
       ))}
     </div>
   );

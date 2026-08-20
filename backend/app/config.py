@@ -20,6 +20,9 @@ class Settings(BaseSettings):
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"
+    # 0 disables the itinerary POST cap (local default). Set to 5 in production.
+    itinerary_rate_limit: int = 0
+    itinerary_rate_window_seconds: int = 60 * 60
 
     # Auth
     app_api_token: str = "dev-app-token"

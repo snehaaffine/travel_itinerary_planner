@@ -3,7 +3,7 @@ from typing import Any
 import httpx
 
 from app.config import Settings, get_settings
-from app.constants import DEFAULT_POI_CATEGORIES, INTEREST_CATEGORIES
+from app.constants import DEFAULT_POI_CATEGORIES, INTEREST_CATEGORIES, POI_FETCH_LIMIT
 
 GEOCODE_AUTOCOMPLETE_URL = "https://api.geoapify.com/v1/geocode/autocomplete"
 GEOCODE_SEARCH_URL = "https://api.geoapify.com/v1/geocode/search"
@@ -138,7 +138,7 @@ def search_places(
     place_id: str | None,
     interests: list[str] | None,
     pets: bool = False,
-    limit: int = 20,
+    limit: int = POI_FETCH_LIMIT,
     settings: Settings | None = None,
 ) -> list[dict[str, Any]]:
     api_key = _require_key(settings)

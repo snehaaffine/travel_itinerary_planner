@@ -51,4 +51,5 @@ export type ItineraryContent = {
   dateRange?: string;
   days: ItineraryDay[];
   notes?: string;
+  interestSummary?: string;
 };

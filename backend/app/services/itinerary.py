@@ -1,7 +1,7 @@
 import json
 import re
 from collections.abc import Callable
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -12,17 +12,18 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.constants import (
     DEFAULT_ITINERARY_DAYS,
-    ITINERARY_RATE_LIMIT,
-    ITINERARY_RATE_WINDOW_SECONDS,
+    ITINERARY_CHUNK_DAYS,
     MAX_ACTIVITIES_PER_DAY,
     MAX_ITINERARY_DAYS,
     ORCHESTRATOR_AGENT_ROUNDS,
+    POI_FETCH_LIMIT,
 )
 from app.db.models import Itinerary, TripState
 from app.llm.provider import get_llm_client
 from app.services.agents import AgentError, message_text, run_specialist, run_tool_agent
 from app.services.geo_store import cache_places, cache_trip_geo, get_cached_places, get_trip_geo
 from app.services.geoapify import GeoapifyError, geocode_destination, search_places
+from app.services.interests import interest_sentence
 from app.services.weather import fetch_weather
 
 
@@ -48,29 +49,34 @@ If the tool is unavailable, say so briefly. English only. No itinerary JSON."""
 
 ORCHESTRATOR_PROMPT = """You are the itinerary orchestrator.
 You do not call weather, places, or search APIs yourself.
-You have specialist agents that make those calls and return briefings:
+Specialist briefings are usually already provided in the user message.
+You have specialist agents if a briefing is missing:
 - weather_agent: forecast/climate for the destination and dates
 - poi_agent: real points of interest matching traveler interests
 - search_agent: extra web context (may be unavailable)
 
-Call weather_agent and poi_agent before writing the itinerary.
+Call weather_agent or poi_agent only if that briefing is missing or empty.
 Use search_agent only if a briefing is thin.
-Then compile the specialist briefings into ONE itinerary.
+Then compile ONE JSON object for ONLY the days listed in the user message.
 Return ONLY valid JSON with this shape:
 {"days":[{"day":1,"dayLabel":"Day 1","date":null,"city":"","country":"",
 "summary":"","activities":[{"title":"","description":"","location":"",
 "notes":""}],"meals":[{"type":"Lunch","venue":"","notes":""}]}],"notes":""}
 Rules:
 - English only
+- Return exactly the listed days — no extra days, no missing days
+- Number days and labels as given (for example Day 4, Day 5)
+- Put the given ISO date on each day when one is provided
 - At most 3 activities per day — a focused day, not a packed schedule
 - Do not include times, clock hours, or morning/afternoon/evening labels
 - Do not tell the traveler when to do each activity
 - No visa, booking, hotels, flights, accommodation names, or regenerate language
 - Fit activities and dining to the stated budget without listing prices
 - Honor diet constraints in meals and food-related stops
-- Use real POI names from poi_agent in location and dining venues
-- Match the requested number of days
-- Include breakfast, lunch, and dinner in meals when food is relevant
+- Use real POI names from the POI briefing in location and dining venues
+- Never reuse a place, attraction, or dining venue already listed as used
+- Prefer unused places from the POI briefing
+- Only include a meal when the POI briefing gave a real venue name; omit meals with no place
 """
 
 
@@ -84,6 +90,97 @@ def _day_count(dates: dict | None) -> int:
         return DEFAULT_ITINERARY_DAYS
     days = (end - start).days + 1
     return max(1, min(days, MAX_ITINERARY_DAYS))
+
+
+def _day_dates(dates: dict | None) -> list[str | None]:
+    count = _day_count(dates)
+    if not dates:
+        return [None] * count
+    try:
+        start = date.fromisoformat(dates["start"])
+    except (KeyError, TypeError, ValueError):
+        return [None] * count
+    return [(start + timedelta(days=index)).isoformat() for index in range(count)]
+
+
+def _chunk_windows(
+    total: int, size: int = ITINERARY_CHUNK_DAYS
+) -> list[tuple[int, int]]:
+    windows: list[tuple[int, int]] = []
+    index = 0
+    while index < total:
+        windows.append((index, min(index + size, total)))
+        index += size
+    return windows
+
+
+def _normalize_place(name: str) -> str:
+    cleaned = re.sub(r"[^\w\s]", "", name.lower())
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    for article in ("the ", "le ", "la ", "les ", "el ", "a ", "an "):
+        if cleaned.startswith(article):
+            cleaned = cleaned[len(article) :]
+            break
+    return cleaned
+
+
+def _activity_place(activity: dict[str, Any]) -> str:
+    return str(activity.get("location") or activity.get("place_name") or "").strip()
+
+
+def _remember_place(name: str, used: set[str], labels: list[str]) -> bool:
+    key = _normalize_place(name)
+    if not key:
+        return True
+    if key in used:
+        return False
+    used.add(key)
+    labels.append(name)
+    return True
+
+
+def _dedupe_days(
+    days: list[dict[str, Any]], used: set[str], labels: list[str]
+) -> list[dict[str, Any]]:
+    cleaned: list[dict[str, Any]] = []
+    for day in days:
+        if not isinstance(day, dict):
+            continue
+        next_day = dict(day)
+        activities: list[dict[str, Any]] = []
+        for activity in next_day.get("activities") or []:
+            if not isinstance(activity, dict):
+                continue
+            place = _activity_place(activity)
+            if place and not _remember_place(place, used, labels):
+                continue
+            activities.append(activity)
+        next_day["activities"] = activities
+        meals: list[dict[str, Any]] = []
+        for meal in next_day.get("meals") or []:
+            if not isinstance(meal, dict):
+                continue
+            venue = str(meal.get("venue") or "").strip()
+            if venue and not _remember_place(venue, used, labels):
+                continue
+            meals.append(meal)
+        next_day["meals"] = meals
+        cleaned.append(next_day)
+    return cleaned
+
+
+def _stitch_days(
+    days: list[dict[str, Any]], dates: list[str | None]
+) -> dict[str, Any]:
+    stitched: list[dict[str, Any]] = []
+    for index, day in enumerate(days):
+        item = dict(day)
+        item["day"] = index + 1
+        item["dayLabel"] = f"Day {index + 1}"
+        if index < len(dates) and dates[index]:
+            item["date"] = dates[index]
+        stitched.append(item)
+    return {"days": stitched}
 
 
 def _resolve_geo(trip: TripState) -> dict[str, Any]:
@@ -159,7 +256,7 @@ def _poi_tool(trip: TripState, geo: dict[str, Any]) -> StructuredTool:
                 "formatted": place["formatted"],
                 "categories": place.get("categories", []),
             }
-            for place in places[:20]
+            for place in places[:POI_FETCH_LIMIT]
         ]
         return json.dumps(compact)
 
@@ -264,6 +361,13 @@ def _extract_json(text: str) -> dict[str, Any]:
     return _normalize_itinerary(parsed)
 
 
+def _has_meal_venue(meal: dict[str, Any]) -> bool:
+    venue = str(meal.get("venue") or "").strip()
+    if not venue:
+        return False
+    return venue.lower() not in {"n/a", "na", "none", "tbd", "unknown", "-", "—"}
+
+
 def _normalize_itinerary(parsed: dict[str, Any]) -> dict[str, Any]:
     days = parsed.get("days")
     if not isinstance(days, list):
@@ -283,30 +387,80 @@ def _normalize_itinerary(parsed: dict[str, Any]) -> dict[str, Any]:
             trimmed.append(item)
         day["activities"] = trimmed
         day.pop("items", None)
+        meals = day.get("meals")
+        if isinstance(meals, list):
+            day["meals"] = [
+                meal
+                for meal in meals
+                if isinstance(meal, dict) and _has_meal_venue(meal)
+            ]
+        else:
+            day.pop("meals", None)
     return parsed
 
 
-def generate_itinerary_content(
+def _collect_briefings(
     trip: TripState,
-    llm_factory: Callable[[], Any] | None = None,
-) -> dict[str, Any]:
-    geo = _resolve_geo(trip)
-    tools = _build_orchestrator_tools(trip, geo, llm_factory=llm_factory)
-    factory = llm_factory or (lambda: get_llm_client(get_settings()))
-    llm = factory()
+    geo: dict[str, Any],
+    llm_factory: Callable[[], Any] | None,
+) -> tuple[str, str]:
     brief = _trip_brief(trip)
+    weather_text = run_specialist(
+        name="weather_agent",
+        system=WEATHER_SPECIALIST_PROMPT,
+        task=brief,
+        tools=[_weather_tool(trip, geo)],
+        llm_factory=llm_factory,
+    )
+    poi_text = run_specialist(
+        name="poi_agent",
+        system=POI_SPECIALIST_PROMPT,
+        task=brief,
+        tools=[_poi_tool(trip, geo)],
+        llm_factory=llm_factory,
+    )
+    return weather_text, poi_text
 
-    try:
-        run = run_tool_agent(
-            system=ORCHESTRATOR_PROMPT,
-            user=brief,
-            tools=tools,
-            max_rounds=ORCHESTRATOR_AGENT_ROUNDS,
-            llm=llm,
-        )
-    except AgentError as exc:
-        raise ItineraryError("Itinerary generation did not complete") from exc
 
+def _chunk_user_prompt(
+    *,
+    brief: str,
+    weather_brief: str,
+    poi_brief: str,
+    dates: list[str | None],
+    start: int,
+    end: int,
+    used_places: list[str],
+) -> str:
+    lines = [
+        brief,
+        "",
+        "Weather briefing:",
+        weather_brief or "(missing)",
+        "",
+        "POI briefing:",
+        poi_brief or "(missing)",
+        "",
+        f"Plan exactly these {end - start} day(s):",
+    ]
+    for index in range(start, end):
+        iso = dates[index]
+        day_no = index + 1
+        if iso:
+            lines.append(f"- Day {day_no} ({iso})")
+        else:
+            lines.append(f"- Day {day_no}")
+    lines.append("")
+    if used_places:
+        avoided = ", ".join(sorted(used_places))
+        lines.append(f"Already used places — do not repeat any of these: {avoided}")
+    else:
+        lines.append("Already used places: none yet.")
+    lines.append("Return JSON for only the days listed above.")
+    return "\n".join(lines)
+
+
+def _parse_chunk_json(run: Any) -> dict[str, Any]:
     try:
         return _extract_json(run.text)
     except ItineraryError:
@@ -322,16 +476,119 @@ def generate_itinerary_content(
         return _extract_json(message_text(retry.content))
 
 
+def _generate_chunk(
+    *,
+    brief: str,
+    weather_brief: str,
+    poi_brief: str,
+    tools: list[StructuredTool],
+    llm: Any,
+    dates: list[str | None],
+    start: int,
+    end: int,
+    used_places: list[str],
+) -> dict[str, Any]:
+    expected = end - start
+    user = _chunk_user_prompt(
+        brief=brief,
+        weather_brief=weather_brief,
+        poi_brief=poi_brief,
+        dates=dates,
+        start=start,
+        end=end,
+        used_places=used_places,
+    )
+    try:
+        run = run_tool_agent(
+            system=ORCHESTRATOR_PROMPT,
+            user=user,
+            tools=tools,
+            max_rounds=ORCHESTRATOR_AGENT_ROUNDS,
+            llm=llm,
+        )
+    except AgentError as exc:
+        raise ItineraryError("Itinerary generation did not complete") from exc
+
+    parsed = _parse_chunk_json(run)
+    days = [day for day in parsed.get("days") or [] if isinstance(day, dict)]
+    if len(days) != expected:
+        run.messages.append(
+            HumanMessage(
+                content=(
+                    f"Return JSON with exactly {expected} days, numbered "
+                    f"{start + 1} to {end}. No extra days."
+                )
+            )
+        )
+        retry = run.llm.invoke(run.messages)
+        parsed = _extract_json(message_text(retry.content))
+        days = [day for day in parsed.get("days") or [] if isinstance(day, dict)]
+    if len(days) > expected:
+        parsed["days"] = days[:expected]
+    elif len(days) < expected:
+        raise ItineraryError("Itinerary chunk was short")
+    return parsed
+
+
+def generate_itinerary_content(
+    trip: TripState,
+    llm_factory: Callable[[], Any] | None = None,
+) -> dict[str, Any]:
+    geo = _resolve_geo(trip)
+    tools = _build_orchestrator_tools(trip, geo, llm_factory=llm_factory)
+    factory = llm_factory or (lambda: get_llm_client(get_settings()))
+    brief = _trip_brief(trip)
+    weather_brief, poi_brief = _collect_briefings(trip, geo, llm_factory)
+
+    dates = _day_dates(trip.dates)
+    used_keys: set[str] = set()
+    used_labels: list[str] = []
+    all_days: list[dict[str, Any]] = []
+    notes: list[str] = []
+
+    for start, end in _chunk_windows(len(dates)):
+        parsed = _generate_chunk(
+            brief=brief,
+            weather_brief=weather_brief,
+            poi_brief=poi_brief,
+            tools=tools,
+            llm=factory(),
+            dates=dates,
+            start=start,
+            end=end,
+            used_places=used_labels,
+        )
+        chunk_days = [day for day in parsed.get("days") or [] if isinstance(day, dict)]
+        chunk_days = _dedupe_days(chunk_days, used_keys, used_labels)
+        all_days.extend(chunk_days)
+        note = str(parsed.get("notes") or "").strip()
+        if note:
+            notes.append(note)
+
+    if len(all_days) != len(dates):
+        raise ItineraryError("Itinerary did not cover every day")
+
+    stitched = _stitch_days(all_days, dates)
+    if notes:
+        stitched["notes"] = " ".join(notes)
+    stitched["interestSummary"] = interest_sentence(trip.destination, trip.interests)
+    return stitched
+
+
 def check_rate_limit(trip_id: UUID, client_ip: str) -> bool:
     from app.cache.redis import get_redis
+
+    settings = get_settings()
+    if settings.itinerary_rate_limit <= 0:
+        return True
 
     redis = get_redis()
     keys = [f"ratelimit:itinerary:trip:{trip_id}", f"ratelimit:itinerary:ip:{client_ip}"]
     for key in keys:
         current = redis.incr(key)
         if current == 1:
-            redis.expire(key, ITINERARY_RATE_WINDOW_SECONDS)
-        if current > ITINERARY_RATE_LIMIT:
+            redis.expire(key, settings.itinerary_rate_window_seconds)
+        if current > settings.itinerary_rate_limit:
             return False
     return True
 

@@ -21,6 +21,7 @@ PAD_INTERESTS = [
 
 STATIC_INTERESTS = [
     *COMMON_INTERESTS,
+    "Fine Dining",
     "Beaches",
     "Mountain Hikes",
     "Adventure Sports",
@@ -39,6 +40,7 @@ INTEREST_FILTERS: dict[str, dict[str, tuple[str, ...]]] = {
     "Cafes": {"include": (), "exclude": ()},
     "Shopping": {"include": (), "exclude": ("machu picchu", "antarctica")},
     "Parks": {"include": (), "exclude": ("maldives",)},
+    "Fine Dining": {"include": (), "exclude": ("machu picchu", "antarctica")},
     "Beaches": {
         "include": (
             "beach",
@@ -187,6 +189,7 @@ INTEREST_CATEGORIES: dict[str, str] = {
     "architecture": "tourism.sights,heritage",
     "tapas": "catering",
     "desert": "natural,tourism.attraction",
+    "fine dining": "catering",
 }
 
 DEFAULT_POI_CATEGORIES = "tourism,entertainment,catering"
@@ -194,11 +197,11 @@ DEFAULT_POI_CATEGORIES = "tourism,entertainment,catering"
 GEOCODE_TTL_SECONDS = 7 * 24 * 60 * 60
 INTEREST_TTL_SECONDS = 7 * 24 * 60 * 60
 PLACES_TTL_SECONDS = 24 * 60 * 60
-ITINERARY_RATE_LIMIT = 5
-ITINERARY_RATE_WINDOW_SECONDS = 60 * 60
 MAX_ITINERARY_DAYS = 14
 DEFAULT_ITINERARY_DAYS = 3
+ITINERARY_CHUNK_DAYS = 3
 MAX_ACTIVITIES_PER_DAY = 3
+POI_FETCH_LIMIT = 50
 SPECIALIST_AGENT_ROUNDS = 4
 ORCHESTRATOR_AGENT_ROUNDS = 6
 
@@ -208,6 +211,9 @@ BUDGET_LEVELS = (
     "Comfortable",
     "Luxury",
 )
+
+FINE_DINING_TAG = "Fine Dining"
+BUDGETS_WITHOUT_FINE_DINING = frozenset({"Budget-friendly", "Moderate"})
 
 DIET_OPTIONS = (
     "Vegetarian",

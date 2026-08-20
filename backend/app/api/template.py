@@ -5,7 +5,7 @@ from app.api.deps import get_current_trip
 from app.constants import DIET_OPTIONS
 from app.db.models import TripPath, TripState
 from app.schemas import TemplateSubmit, TripResponse, parse_diets, serialize_diets
-from app.services.interests import interests_for_destination
+from app.services.interests import filter_interests_for_budget, interests_for_destination
 
 router = APIRouter()
 
@@ -25,8 +25,11 @@ def trip_response(trip: TripState) -> TripResponse:
 
 
 @router.get("/template/interests")
-def list_interests(destination: str = Query(min_length=1, max_length=200)) -> dict[str, list[str]]:
-    return {"tags": interests_for_destination(destination)}
+def list_interests(
+    destination: str = Query(min_length=1, max_length=200),
+    budget: str | None = Query(default=None, max_length=50),
+) -> dict[str, list[str]]:
+    return {"tags": interests_for_destination(destination, budget)}
 
 
 @router.post("/template", response_model=TripResponse)
@@ -39,7 +42,7 @@ def submit_template(
     trip.path = TripPath.TEMPLATE
     trip.trip_type = payload.trip_type
     trip.pets = payload.pets
-    trip.interests = payload.interests
+    trip.interests = filter_interests_for_budget(payload.interests, payload.budget)
     trip.flavor_preference = payload.budget
     trip.food_preference = serialize_diets(diets)
     db = object_session(trip)

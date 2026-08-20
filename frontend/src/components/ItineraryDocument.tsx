@@ -27,11 +27,55 @@ export function ItineraryDocument({
   content: ItineraryContent;
   destination?: DestinationChoice | null;
 }) {
+  const place = destination?.name || content.days[0]?.city || "";
+  const country = destination?.country || content.days[0]?.country || "";
   return (
     <div className="fade-up">
+      {place ? (
+        <div style={{ marginBottom: 8, paddingTop: 8 }}>
+          <h2
+            style={{
+              fontFamily: "Fraunces, serif",
+              fontSize: "clamp(22px, 4vw, 32px)",
+              fontWeight: 700,
+              color: T.navy,
+              margin: 0,
+              lineHeight: 1.2,
+            }}
+          >
+            {place}
+            {country ? (
+              <span
+                style={{
+                  fontWeight: 400,
+                  fontStyle: "italic",
+                  fontSize: "0.62em",
+                  color: T.muted,
+                  marginLeft: 10,
+                }}
+              >
+                {country}
+              </span>
+            ) : null}
+          </h2>
+          {content.interestSummary ? (
+            <p
+              style={{
+                fontFamily: "Outfit, sans-serif",
+                fontSize: 14,
+                color: T.muted,
+                margin: "10px 0 0",
+                lineHeight: 1.55,
+              }}
+            >
+              {content.interestSummary}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       {content.days.map((day) => {
         const activities = activitiesFor(day);
-        const meals = day.meals || [];
+        const meals = (day.meals || []).filter((meal) => meal.venue?.trim());
         const city = day.city || destination?.name || "";
         const country = day.country || destination?.country || "";
         return (

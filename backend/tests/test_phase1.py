@@ -5,10 +5,19 @@ from app.db.models import TripState
 from app.services.geoapify import _result_to_place, categories_for_interests
 from app.services.interests import (
     format_interest_label,
+    interest_sentence,
     interests_for_destination,
     unique_interest_tags,
 )
-from app.services.itinerary import _day_count, _extract_json, trip_is_complete
+from app.services.itinerary import (
+    _chunk_windows,
+    _day_count,
+    _day_dates,
+    _dedupe_days,
+    _extract_json,
+    _stitch_days,
+    trip_is_complete,
+)
 
 
 def test_categories_for_interests_maps_mock_tags():
@@ -78,9 +87,90 @@ def test_interests_for_destination_filters_general_tags():
     assert set(STATIC_INTERESTS) - set(paris)
 
 
+def test_fine_dining_hidden_on_budget_friendly_and_moderate():
+    luxury = interests_for_destination("Paris, France", "Luxury")
+    comfortable = interests_for_destination("Paris, France", "Comfortable")
+    modest = interests_for_destination("Paris, France", "Budget-friendly")
+    moderate = interests_for_destination("Paris, France", "Moderate")
+    assert "Fine Dining" in luxury
+    assert "Fine Dining" in comfortable
+    assert "Fine Dining" not in modest
+    assert "Fine Dining" not in moderate
+    assert len(modest) >= 8
+    assert len(moderate) >= 8
+
+
+def test_interest_sentence_names_every_selected_tag():
+    sentence = interest_sentence("Paris, France", ["Street Food", "Museums", "Cafes"])
+    assert sentence.startswith("This Paris plan")
+    assert "street food" in sentence
+    assert "museums" in sentence
+    assert "cafes" in sentence
+    assert sentence.count(".") == 1
+
+
 def test_day_count_from_range_and_flexible():
     assert _day_count(None) == 3
     assert _day_count({"start": "2026-08-17", "end": "2026-08-19"}) == 3
+    assert _day_count({"start": "2026-08-17", "end": "2026-08-21"}) == 5
+    assert _day_count({"start": "2026-08-17", "end": "2026-08-23"}) == 7
+    assert _day_count({"start": "2026-08-01", "end": "2026-08-14"}) == 14
+    assert _day_count({"start": "2026-08-01", "end": "2026-08-20"}) == 14
+
+
+def test_chunk_windows_split_into_three_day_batches():
+    assert _chunk_windows(1) == [(0, 1)]
+    assert _chunk_windows(3) == [(0, 3)]
+    assert _chunk_windows(7) == [(0, 3), (3, 6), (6, 7)]
+    assert _chunk_windows(14) == [(0, 3), (3, 6), (6, 9), (9, 12), (12, 14)]
+
+
+def test_day_dates_fill_iso_for_each_day():
+    assert _day_dates(None) == [None, None, None]
+    assert _day_dates({"start": "2026-08-17", "end": "2026-08-21"}) == [
+        "2026-08-17",
+        "2026-08-18",
+        "2026-08-19",
+        "2026-08-20",
+        "2026-08-21",
+    ]
+
+
+def test_dedupe_and_stitch_drop_repeated_places():
+    first = [
+        {
+            "day": 1,
+            "activities": [{"title": "Louvre", "location": "Louvre"}],
+            "meals": [{"type": "Lunch", "venue": "Le Comptoir"}],
+        }
+    ]
+    second = [
+        {
+            "day": 1,
+            "activities": [
+                {"title": "Louvre again", "location": "The Louvre"},
+                {"title": "Marais walk", "location": "Le Marais"},
+            ],
+            "meals": [{"type": "Lunch", "venue": "Le Comptoir"}],
+        }
+    ]
+    used: set[str] = set()
+    labels: list[str] = []
+    kept = _dedupe_days(first, used, labels)
+    kept.extend(_dedupe_days(second, used, labels))
+    stitched = _stitch_days(kept, ["2026-08-17", "2026-08-18"])
+    places = [
+        act["location"]
+        for day in stitched["days"]
+        for act in day["activities"]
+    ]
+    venues = [meal["venue"] for day in stitched["days"] for meal in day["meals"]]
+    assert [day["day"] for day in stitched["days"]] == [1, 2]
+    assert stitched["days"][1]["dayLabel"] == "Day 2"
+    assert stitched["days"][1]["date"] == "2026-08-18"
+    assert places == ["Louvre", "Le Marais"]
+    assert venues == ["Le Comptoir"]
+    assert "The Louvre" not in places
 
 
 def test_extract_json_accepts_markdown_and_trailing_comma():

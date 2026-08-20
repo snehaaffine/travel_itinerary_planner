@@ -1,3 +1,4 @@
+import json
 from uuid import uuid4
 
 from langchain_core.messages import AIMessage
@@ -12,6 +13,7 @@ class ScriptedLLM:
     def __init__(self, responses: list):
         self.responses = list(responses)
         self.bound_tool_names: list[str] = []
+        self.prompts: list[str] = []
 
     def bind_tools(self, tools, **kwargs):
         self.bound_tool_names = [tool.name for tool in tools]
@@ -19,7 +21,39 @@ class ScriptedLLM:
 
     def invoke(self, messages):
         assert self.responses, "ScriptedLLM has no remaining responses"
+        user = next(
+            (
+                message.content
+                for message in reversed(messages)
+                if getattr(message, "content", None)
+            ),
+            "",
+        )
+        if isinstance(user, str):
+            self.prompts.append(user)
         return self.responses.pop(0)
+
+
+def _trip(**kwargs) -> TripState:
+    defaults = dict(
+        id=uuid4(),
+        destination="Paris",
+        trip_type="Solo",
+        interests=["Museums"],
+        pets=False,
+        dates={"start": "2026-08-17", "end": "2026-08-19"},
+    )
+    defaults.update(kwargs)
+    return TripState(**defaults)
+
+
+def _day(day: int, place: str) -> dict:
+    return {
+        "day": day,
+        "summary": place,
+        "activities": [{"title": place, "description": place, "location": place}],
+        "meals": [{"type": "Lunch", "venue": f"{place} Cafe"}],
+    }
 
 
 def test_specialist_agent_calls_its_own_tool():
@@ -52,14 +86,10 @@ def test_specialist_agent_calls_its_own_tool():
 
 
 def test_orchestrator_exposes_specialist_agents_not_raw_tools():
-    trip = TripState(
-        id=uuid4(),
-        destination="Paris",
-        trip_type="Solo",
-        interests=["Street Food"],
-        pets=False,
+    tools = _build_orchestrator_tools(
+        _trip(dates=None),
+        {"lat": 48.8, "lon": 2.3, "place_id": "abc"},
     )
-    tools = _build_orchestrator_tools(trip, {"lat": 48.8, "lon": 2.3, "place_id": "abc"})
     names = [tool.name for tool in tools]
     assert names == ["weather_agent", "poi_agent", "search_agent"]
 
@@ -74,7 +104,10 @@ def test_orchestrator_compiles_specialist_briefings_into_json(monkeypatch):
         lambda **kwargs: f"[{kwargs['name']}] briefing",
     )
 
-    itinerary_json = '{"days":[{"day":1,"summary":"Louvre morning","activities":[]}]}'
+    itinerary_json = {
+        "days": [_day(1, "Louvre"), _day(2, "Orsay"), _day(3, "Rodin")],
+        "notes": "",
+    }
     llm = ScriptedLLM(
         [
             AIMessage(
@@ -84,23 +117,60 @@ def test_orchestrator_compiles_specialist_briefings_into_json(monkeypatch):
                     {"id": "p", "name": "poi_agent", "args": {}},
                 ],
             ),
-            AIMessage(content=itinerary_json),
+            AIMessage(content=json.dumps(itinerary_json)),
         ]
     )
-    trip = TripState(
-        id=uuid4(),
-        destination="Paris",
-        trip_type="Solo",
-        interests=["Museums & Art"],
-        pets=False,
-        dates={"start": "2026-08-17", "end": "2026-08-19"},
-    )
+    parsed = generate_itinerary_content(_trip(), llm_factory=lambda: llm)
 
-    parsed = generate_itinerary_content(trip, llm_factory=lambda: llm)
-
-    assert parsed["days"][0]["day"] == 1
+    assert [day["day"] for day in parsed["days"]] == [1, 2, 3]
+    assert parsed["days"][0]["date"] == "2026-08-17"
     assert llm.bound_tool_names == ["weather_agent", "poi_agent", "search_agent"]
     assert not llm.responses
+
+
+def test_seven_day_trip_chunks_and_drops_repeated_places(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.itinerary._resolve_geo",
+        lambda trip: {"lat": 48.8, "lon": 2.3, "place_id": "abc"},
+    )
+    monkeypatch.setattr(
+        "app.services.itinerary.run_specialist",
+        lambda **kwargs: f"[{kwargs['name']}] briefing",
+    )
+
+    llm = ScriptedLLM(
+        [
+            AIMessage(
+                content=json.dumps(
+                    {"days": [_day(1, "Louvre"), _day(2, "Orsay"), _day(3, "Rodin")]}
+                )
+            ),
+            AIMessage(
+                content=json.dumps(
+                    {"days": [_day(4, "Louvre"), _day(5, "Marais"), _day(6, "Canal")]}
+                )
+            ),
+            AIMessage(content=json.dumps({"days": [_day(7, "Sacre Coeur")]})),
+        ]
+    )
+    trip = _trip(dates={"start": "2026-08-17", "end": "2026-08-23"})
+    parsed = generate_itinerary_content(trip, llm_factory=lambda: llm)
+
+    assert [day["day"] for day in parsed["days"]] == [1, 2, 3, 4, 5, 6, 7]
+    assert parsed["days"][3]["date"] == "2026-08-20"
+    assert parsed["days"][6]["date"] == "2026-08-23"
+    places = [
+        activity["location"]
+        for day in parsed["days"]
+        for activity in day["activities"]
+    ]
+    assert places == ["Louvre", "Orsay", "Rodin", "Marais", "Canal", "Sacre Coeur"]
+    assert parsed["days"][3]["activities"] == []
+    avoid_prompt = llm.prompts[1]
+    assert "Already used places" in avoid_prompt
+    assert "Louvre" in avoid_prompt
+    assert "Day 4" in avoid_prompt
+    assert "Day 7" not in llm.prompts[1]
 
 
 def test_run_tool_agent_runs_unknown_tool_without_raising():
@@ -113,6 +183,7 @@ def test_run_tool_agent_runs_unknown_tool_without_raising():
             AIMessage(content="Nothing found."),
         ]
     )
+
     def weather_stub() -> str:
         return "ok"
 

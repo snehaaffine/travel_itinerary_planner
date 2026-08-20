@@ -72,6 +72,7 @@ The app runs at `http://localhost:5173`.
 |---|---|
 | `DATABASE_URL` | Postgres connection string |
 | `REDIS_URL` | Redis connection string |
+| `ITINERARY_RATE_LIMIT` | Max `POST /itinerary` per hour per trip/IP. `0` disables (local default) |
 | `APP_API_TOKEN` | Service token for frontend↔backend auth |
 | `SESSION_SECRET` | Key for signing session cookies |
 | `CORS_ORIGINS` | Allowed frontend origins (comma-separated) |

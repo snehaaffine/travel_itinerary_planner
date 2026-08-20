@@ -23,6 +23,7 @@ export const STATIC_INTERESTS = [
   "Cafes",
   "Shopping",
   "Parks",
+  "Fine Dining",
   "Beaches",
   "Mountain Hikes",
   "Adventure Sports",
@@ -63,4 +64,4 @@ export const MONTH_NAMES = [
   "December",
 ];
 
-export const STEPS = ["search", "calendar", "travelType", "interests", "budget", "itinerary"] as const;
+export const STEPS = ["search", "calendar", "travelType", "budget", "interests", "itinerary"] as const;
