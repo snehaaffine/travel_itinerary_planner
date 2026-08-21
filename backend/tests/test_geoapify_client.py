@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from app.services.geoapify import autocomplete_cities
+from app.services.geoapify.poi import autocomplete_cities
 
 
 def test_autocomplete_cities_uses_geoapify_json_results():
@@ -18,8 +18,8 @@ def test_autocomplete_cities_uses_geoapify_json_results():
     }
     mock_response = type("Resp", (), {"is_error": False, "json": lambda self: payload})()
     with (
-        patch("app.services.geoapify._require_key", return_value="test-key"),
-        patch("app.services.geoapify.httpx.get", return_value=mock_response),
+        patch("app.services.geoapify.poi.require_key", return_value="test-key"),
+        patch("app.services.geoapify.poi.httpx.get", return_value=mock_response),
     ):
         places = autocomplete_cities("tok")
     assert places[0]["name"] == "Tokyo"

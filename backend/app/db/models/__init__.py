@@ -56,7 +56,7 @@ class StorySession(Base):
         UUID(as_uuid=True), ForeignKey("trip_state.id"), nullable=False, index=True
     )
     tone: Mapped[str] = mapped_column(String(100), nullable=False)
-    beats: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=list)
+    beats: Mapped[dict | list | None] = mapped_column(JSONB, nullable=True, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -74,6 +74,7 @@ class Itinerary(Base):
         UUID(as_uuid=True), ForeignKey("trip_state.id"), nullable=False, index=True
     )
     content: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    map_image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

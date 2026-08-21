@@ -2,23 +2,13 @@ from typing import Any
 
 import httpx
 
-from app.config import Settings, get_settings
+from app.config import Settings
 from app.constants import DEFAULT_POI_CATEGORIES, INTEREST_CATEGORIES
+from app.services.geoapify.common import GeoapifyError, require_key
 
 GEOCODE_AUTOCOMPLETE_URL = "https://api.geoapify.com/v1/geocode/autocomplete"
 GEOCODE_SEARCH_URL = "https://api.geoapify.com/v1/geocode/search"
 PLACES_URL = "https://api.geoapify.com/v2/places"
-
-
-class GeoapifyError(Exception):
-    pass
-
-
-def _require_key(settings: Settings | None = None) -> str:
-    settings = settings or get_settings()
-    if not settings.geoapify_api_key:
-        raise GeoapifyError("GEOAPIFY_API_KEY is not configured")
-    return settings.geoapify_api_key
 
 
 def _feature_to_place(feature: dict[str, Any]) -> dict[str, Any] | None:
@@ -66,7 +56,7 @@ def autocomplete_cities(
     limit: int = 6,
     settings: Settings | None = None,
 ) -> list[dict[str, Any]]:
-    api_key = _require_key(settings)
+    api_key = require_key(settings)
     response = httpx.get(
         GEOCODE_AUTOCOMPLETE_URL,
         params={"text": query, "type": "city", "format": "json", "limit": limit, "apiKey": api_key},
@@ -89,7 +79,7 @@ def geocode_destination(
     place_id: str | None = None,
     settings: Settings | None = None,
 ) -> dict[str, Any]:
-    api_key = _require_key(settings)
+    api_key = require_key(settings)
     params: dict[str, Any] = {
         "text": text,
         "type": "city",
@@ -119,6 +109,45 @@ def geocode_destination(
     return parsed
 
 
+def geocode_place(
+    text: str,
+    *,
+    lat: float,
+    lon: float,
+    radius_m: int = 90_000,
+    settings: Settings | None = None,
+) -> dict[str, Any] | None:
+    query = text.strip()
+    if not query:
+        return None
+    try:
+        api_key = require_key(settings)
+    except GeoapifyError:
+        return None
+    params: dict[str, Any] = {
+        "text": query,
+        "format": "json",
+        "limit": 1,
+        "filter": f"circle:{lon},{lat},{radius_m}",
+        "bias": f"proximity:{lon},{lat}",
+        "apiKey": api_key,
+    }
+    try:
+        response = httpx.get(GEOCODE_SEARCH_URL, params=params, timeout=15.0)
+    except httpx.HTTPError:
+        return None
+    if response.is_error:
+        return None
+    data = response.json()
+    results = data.get("results") or []
+    if results:
+        return _result_to_place(results[0])
+    features = data.get("features") or []
+    if features:
+        return _feature_to_place(features[0])
+    return None
+
+
 def categories_for_interests(interests: list[str] | None) -> str:
     if not interests:
         return DEFAULT_POI_CATEGORIES
@@ -141,7 +170,7 @@ def search_places(
     limit: int = 20,
     settings: Settings | None = None,
 ) -> list[dict[str, Any]]:
-    api_key = _require_key(settings)
+    api_key = require_key(settings)
     categories = categories_for_interests(interests)
     params: dict[str, Any] = {
         "categories": categories,

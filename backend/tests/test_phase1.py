@@ -2,7 +2,14 @@ import json
 
 from app.constants import STATIC_INTERESTS
 from app.db.models import TripState
-from app.services.geoapify import _result_to_place, categories_for_interests
+from app.services.geoapify.map import (
+    MAP_STYLE,
+    map_area_rect,
+    map_center,
+    static_map_marker,
+    static_map_request_body,
+)
+from app.services.geoapify.poi import _result_to_place, categories_for_interests
 from app.services.interests import (
     format_interest_label,
     interest_sentence,
@@ -12,10 +19,10 @@ from app.services.interests import (
 from app.services.itinerary import _day_count, _extract_json, trip_is_complete
 
 
-def test_categories_for_interests_maps_mock_tags():
-    cats = categories_for_interests(["Street Food", "Nightlife"])
+def test_categories_for_story_interest_codes():
+    cats = categories_for_interests(["sights", "food_drink"])
+    assert "tourism.sights" in cats
     assert "catering" in cats
-    assert "catering.bar" in cats
 
 
 def test_categories_default_when_empty():
@@ -36,6 +43,44 @@ def test_result_to_place_normalizes_geoapify_json():
     assert place is not None
     assert place["name"] == "Paris"
     assert place["place_id"] == "abc"
+
+
+def test_static_map_marker_format():
+    marker = static_map_marker(2.3, 48.8, color="#333d29", text="1")
+    assert marker["lon"] == 2.3
+    assert marker["lat"] == 48.8
+    assert marker["type"] == "circle"
+    assert marker["color"] == "#333d29"
+    assert marker["text"] == "1"
+    assert marker["textsize"] == "medium"
+
+
+def test_static_map_request_body_uses_post_customization():
+    body = static_map_request_body([(2.35, 48.85), (2.13, 48.80)])
+    assert body["style"] == MAP_STYLE
+    assert body["format"] == "png"
+    assert body["markers"][0]["text"] == "1"
+    assert body["markers"][1]["color"] == "#c8a96e"
+    assert "geometries" not in body
+    assert "area" not in body
+    assert "zoom" not in body
+    assert body["center"]["lon"] == (2.35 + 2.13) / 2
+    assert body["center"]["lat"] == (48.85 + 48.80) / 2
+
+
+def test_map_center_is_midpoint():
+    center = map_center([(2.35, 48.85), (2.34, 48.848)])
+    assert 2.33 < center["lon"] < 2.36
+    assert 48.848 <= center["lat"] <= 48.85
+
+
+def test_map_area_rect_pads_bounds():
+    area = map_area_rect([(2.3, 48.8), (2.4, 48.9)])
+    assert area["type"] == "rect"
+    value = area["value"]
+    assert value["lon1"] < 2.3
+    assert value["lon2"] > 2.4
+    assert value["lon2"] - value["lon1"] < 0.2
 
 
 def test_interest_labels_are_title_case_and_short():

@@ -1,4 +1,8 @@
+import { useEffect, useState } from "react";
 import type { DestinationChoice, ItineraryContent, ItineraryDay } from "../types";
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+const APP_API_TOKEN = import.meta.env.VITE_APP_API_TOKEN || "dev-app-token";
 
 const T = {
   forest: "#333d29",
@@ -9,6 +13,44 @@ const T = {
   accent: "#c8a96e",
   accentSoft: "#f5edd8",
 };
+
+function ItineraryMap({ day }: { day: number }) {
+  const [src, setSrc] = useState<string | null>(null);
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    let cancelled = false;
+    fetch(`${API_BASE_URL}/itinerary/map/${day}`, {
+      credentials: "include",
+      headers: { "X-App-Token": APP_API_TOKEN },
+    })
+      .then((response) => (response.ok ? response.blob() : null))
+      .then((blob) => {
+        if (cancelled || !blob || blob.size === 0) return;
+        objectUrl = URL.createObjectURL(blob);
+        setSrc(objectUrl);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [day]);
+  return (
+    <div
+      className="itinerary-day-map"
+      style={{
+        borderRadius: 12,
+        overflow: "hidden",
+        border: `1px solid ${T.rule}`,
+        background: "#eef1ea",
+      }}
+    >
+      {src ? (
+        <img src={src} alt={`Map of day ${day} stops`} />
+      ) : null}
+    </div>
+  );
+}
 
 function activitiesFor(day: ItineraryDay) {
   const rows = day.activities?.length ? day.activities : day.items || [];
@@ -163,15 +205,38 @@ export function ItineraryDocument({
               ) : null}
             </div>
 
-            <div style={{ display: "flex", flexDirection: "column" }}>
+            <div className="itinerary-day-body">
+              <ItineraryMap day={day.day} />
+              <div style={{ display: "flex", flexDirection: "column" }}>
               {activities.map((act, i) => (
                 <div
                   key={`${day.day}-${i}`}
                   style={{
+                    display: "grid",
+                    gridTemplateColumns: "28px minmax(0, 1fr)",
+                    gap: 10,
                     padding: "14px 0",
                     borderBottom: `1px solid ${T.rule}`,
                   }}
                 >
+                  <span
+                    style={{
+                      width: 24,
+                      height: 24,
+                      borderRadius: "50%",
+                      background: i === 0 ? T.forest : T.accent,
+                      color: "#fff",
+                      fontFamily: "Outfit, sans-serif",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      marginTop: 1,
+                    }}
+                  >
+                    {i + 1}
+                  </span>
                   <div>
                     <p
                       style={{
@@ -227,6 +292,7 @@ export function ItineraryDocument({
                   </div>
                 </div>
               ))}
+              </div>
             </div>
 
             {meals.length > 0 && (

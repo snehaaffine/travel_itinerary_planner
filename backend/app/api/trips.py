@@ -3,11 +3,12 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_trip
 from app.auth.session import create_session_cookie
-from app.db.models import TripPath, TripState
+from app.db.models import TripState
 from app.db.session import get_db
 from app.schemas import TripCreate, TripDatesUpdate, TripResponse, parse_diets
 from app.services.geo_store import cache_geocode, cache_trip_geo, get_cached_geocode
-from app.services.geoapify import GeoapifyError, geocode_destination
+from app.services.geoapify.common import GeoapifyError
+from app.services.geoapify.poi import geocode_destination
 
 router = APIRouter()
 
@@ -61,7 +62,7 @@ def create_trip(
     trip = TripState(
         destination=destination,
         dates=payload.dates,
-        path=TripPath.TEMPLATE,
+        path=None,
     )
     db.add(trip)
     db.commit()

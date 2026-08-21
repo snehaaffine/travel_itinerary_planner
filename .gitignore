@@ -218,6 +218,9 @@ __marimo__/
 node_modules/
 frontend/dist/
 frontend/.env
+frontend/.vite/
+frontend/vite.config.js.timestamp-*
+frontend/vite.config.ts.timestamp-*
 
 # Backend
 backend/.venv/
@@ -228,3 +231,4 @@ backend/.env
 
 # Travel Planner PRD (Product Requirements Document)
 travel-planner-prd.md
+Travel Planner PRD.md

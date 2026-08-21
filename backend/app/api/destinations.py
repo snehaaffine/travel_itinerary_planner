@@ -1,7 +1,8 @@
 from fastapi import APIRouter, HTTPException, Query, status
 
 from app.schemas import DestinationSuggestion
-from app.services.geoapify import GeoapifyError, autocomplete_cities
+from app.services.geoapify.common import GeoapifyError
+from app.services.geoapify.poi import autocomplete_cities
 
 router = APIRouter()
 
