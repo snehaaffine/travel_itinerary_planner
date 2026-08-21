@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { apiClient } from "./api/client";
+import { streamStoryBeat } from "./api/storyStream";
 import { CalendarMonth, addMonths, isCurrentMonth } from "./components/Calendar";
 import { ItineraryDocument } from "./components/ItineraryDocument";
 import { Screen } from "./components/Screen";
-import { BUDGET_LEVELS, DIET_OPTIONS, POPULAR, TRAVEL_TYPES } from "./data";
-import type { DateRange, DestinationChoice, ItineraryContent, Step } from "./types";
+import { BeatScreen, GenreScreen, PathForkScreen, ProfileScreen } from "./components/StoryFlow";
+import { BUDGET_LEVELS, DIET_OPTIONS, POPULAR, STORY_STEPS, TRAVEL_TYPES } from "./data";
+import type { DateRange, DestinationChoice, HolidayProfile, ItineraryContent, Step, StoryBeat } from "./types";
 
 const CARD_W = 220;
 const CARD_GAP = 12;
@@ -642,6 +644,7 @@ function ItineraryScreen({
   destination,
   onNext,
   onBack,
+  progressSteps,
 }: {
   content: ItineraryContent | null;
   error: string | null;
@@ -649,11 +652,13 @@ function ItineraryScreen({
   destination: DestinationChoice | null;
   onNext: () => void;
   onBack: () => void;
+  progressSteps?: readonly string[];
 }) {
   const failed = Boolean(error) && !loading && !content;
   return (
     <Screen
       step="itinerary"
+      steps={progressSteps}
       title={loading ? "Crafting your days…" : failed ? "Almost there" : "Your Itinerary"}
       subtitle={
         loading
@@ -683,7 +688,13 @@ function ItineraryScreen({
   );
 }
 
-function FeedbackScreen({ onSubmit }: { onSubmit: (rating: number, comment: string) => Promise<void> }) {
+function FeedbackScreen({
+  onSubmit,
+  progressSteps,
+}: {
+  onSubmit: (rating: number, comment: string) => Promise<void>;
+  progressSteps?: readonly string[];
+}) {
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState("");
   const [done, setDone] = useState(false);
@@ -691,7 +702,7 @@ function FeedbackScreen({ onSubmit }: { onSubmit: (rating: number, comment: stri
 
   if (done) {
     return (
-      <Screen step="feedback" title="Thank you." subtitle="Your notes help us improve the next trip.">
+      <Screen step="feedback" steps={progressSteps} title="Thank you." subtitle="Your notes help us improve the next trip.">
         <p className="fade-up" style={{ color: "var(--cream-muted)" }}>
           Safe travels.
         </p>
@@ -702,6 +713,7 @@ function FeedbackScreen({ onSubmit }: { onSubmit: (rating: number, comment: stri
   return (
     <Screen
       step="feedback"
+      steps={progressSteps}
       title="How was this plan?"
       subtitle="A rating is enough. A comment is optional."
       onNext={async () => {
@@ -745,6 +757,7 @@ function FeedbackScreen({ onSubmit }: { onSubmit: (rating: number, comment: stri
 
 export default function App() {
   const [step, setStep] = useState<Step>("search");
+  const [path, setPath] = useState<"template" | "story" | null>(null);
   const [destination, setDestination] = useState<DestinationChoice | null>(null);
   const [tripType, setTripType] = useState<string | null>(null);
   const [pets, setPets] = useState(false);
@@ -755,6 +768,15 @@ export default function App() {
   const [itinerary, setItinerary] = useState<ItineraryContent | null>(null);
   const [genError, setGenError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [storyBeats, setStoryBeats] = useState<StoryBeat[]>([]);
+  const [beatIndex, setBeatIndex] = useState(0);
+  const [narrative, setNarrative] = useState("");
+  const [selectedChoiceIds, setSelectedChoiceIds] = useState<string[]>([]);
+  const [storyLoading, setStoryLoading] = useState(false);
+  const [storyError, setStoryError] = useState<string | null>(null);
+  const [holidayProfile, setHolidayProfile] = useState<HolidayProfile | null>(null);
+  const [holidayText, setHolidayText] = useState("");
+  const [profileVote, setProfileVote] = useState<"up" | "down" | null>(null);
 
   useEffect(() => {
     if (!destination || !budget) {
@@ -806,14 +828,120 @@ export default function App() {
         method: "POST",
         body: JSON.stringify({ trip_type: tripType, pets, interests: picked, budget, diets }),
       });
-      const result = await apiClient<{ content: ItineraryContent }>("/itinerary", { method: "POST" });
-      setItinerary(result.content);
+      const result = await apiClient<{ content: ItineraryContent; map_image_url?: string | null }>(
+        "/itinerary",
+        { method: "POST" },
+      );
+      setItinerary({ ...result.content, map_image_url: result.map_image_url });
     } catch {
       setGenError("failed");
     } finally {
       setGenerating(false);
     }
   };
+
+  const generateFromStory = async () => {
+    if (profileVote) {
+      try {
+        await apiClient("/story/profile-feedback", {
+          method: "POST",
+          body: JSON.stringify({ vote: profileVote }),
+        });
+      } catch {
+        // Vote is a training signal only; generation still proceeds.
+      }
+    }
+    setGenerating(true);
+    setGenError(null);
+    setStep("itinerary");
+    try {
+      const result = await apiClient<{ content: ItineraryContent; map_image_url?: string | null }>(
+        "/itinerary",
+        { method: "POST" },
+      );
+      setItinerary({ ...result.content, map_image_url: result.map_image_url });
+    } catch {
+      setGenError("failed");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const startStory = async (genre: string) => {
+    setPath("story");
+    setStoryBeats([]);
+    setBeatIndex(0);
+    setNarrative("");
+    setSelectedChoiceIds([]);
+    setHolidayProfile(null);
+    setHolidayText("");
+    setProfileVote(null);
+    setStoryError(null);
+    setStoryLoading(true);
+    setStep("beat");
+    try {
+      await streamStoryBeat(
+        { tone: genre },
+        {
+          onNarrative: setNarrative,
+          onBeat: (beat) => {
+            setStoryBeats([beat]);
+            setBeatIndex(0);
+            setNarrative(beat.narrative_text);
+          },
+        },
+      );
+    } catch (err) {
+      setStoryError(err instanceof Error ? err.message : "The narrator stalled. Try again.");
+    } finally {
+      setStoryLoading(false);
+    }
+  };
+
+  const continueStory = async () => {
+    const current = storyBeats[beatIndex];
+    if (!current || selectedChoiceIds.length < 1) return;
+    const submittingLast = current.beat_number === 5;
+    setStoryError(null);
+    setStoryLoading(true);
+    if (submittingLast) {
+      setHolidayProfile(null);
+      setHolidayText("");
+      setStep("profile");
+    } else {
+      setNarrative("");
+    }
+    try {
+      const nextBeats = [...storyBeats];
+      await streamStoryBeat(
+        { choice_ids: selectedChoiceIds },
+        {
+          onNarrative: (text) => {
+            if (!submittingLast) setNarrative(text);
+          },
+          onHoliday: setHolidayText,
+          onBeat: (beat) => {
+            nextBeats.push(beat);
+            setStoryBeats(nextBeats);
+            setBeatIndex(nextBeats.length - 1);
+            setNarrative(beat.narrative_text);
+            setSelectedChoiceIds([]);
+          },
+          onProfile: (profile) => {
+            setHolidayProfile(profile);
+            setHolidayText(profile.holiday);
+          },
+        },
+      );
+    } catch (err) {
+      setStoryError(err instanceof Error ? err.message : "The narrator stalled. Try again.");
+      if (submittingLast) setStep("beat");
+    } finally {
+      setStoryLoading(false);
+    }
+  };
+
+  const storyProgress = path === "story" ? STORY_STEPS : undefined;
 
   return (
     <div style={{ maxWidth: step === "calendar" || step === "itinerary" ? 920 : 480, margin: "0 auto", minHeight: "100vh" }}>
@@ -830,13 +958,72 @@ export default function App() {
           onBack={() => setStep("search")}
           onNext={async (nextDates, skipped) => {
             await createTrip(nextDates, skipped);
+            setStep("path");
+          }}
+        />
+      )}
+      {step === "path" && (
+        <PathForkScreen
+          onBack={() => setStep("calendar")}
+          onTemplate={() => {
+            setPath("template");
             setStep("travelType");
           }}
+          onStory={() => setStep("genre")}
+        />
+      )}
+      {step === "genre" && (
+        <GenreScreen onBack={() => setStep("path")} onNext={startStory} />
+      )}
+      {step === "beat" && (
+        <BeatScreen
+          beat={storyBeats[beatIndex] ?? null}
+          narrative={narrative}
+          loading={storyLoading}
+          error={storyError}
+          selectedIds={selectedChoiceIds}
+          onToggle={(id) => {
+            setSelectedChoiceIds((prev) =>
+              prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
+            );
+          }}
+          onBack={() => {
+            if (beatIndex > 0) {
+              const previous = storyBeats[beatIndex - 1];
+              setBeatIndex(beatIndex - 1);
+              setNarrative(previous?.narrative_text ?? "");
+              setSelectedChoiceIds([]);
+              return;
+            }
+            setStep("genre");
+          }}
+          onNext={() => {
+            if (beatIndex < storyBeats.length - 1) {
+              const next = storyBeats[beatIndex + 1];
+              setBeatIndex(beatIndex + 1);
+              setNarrative(next.narrative_text);
+              setSelectedChoiceIds([]);
+              return;
+            }
+            continueStory();
+          }}
+        />
+      )}
+      {step === "profile" && (
+        <ProfileScreen
+          profile={holidayProfile}
+          holiday={holidayText}
+          loading={storyLoading}
+          error={storyError}
+          vote={profileVote}
+          onVote={setProfileVote}
+          onBack={() => setStep("beat")}
+          onNext={generateFromStory}
         />
       )}
       {step === "travelType" && (
         <TravelTypeScreen
-          onBack={() => setStep("calendar")}
+          onBack={() => setStep("path")}
           onNext={(type, withPets) => {
             setTripType(type);
             setPets(withPets);
@@ -869,15 +1056,17 @@ export default function App() {
           error={genError}
           loading={generating}
           destination={destination}
+          progressSteps={storyProgress}
           onNext={() => setStep("feedback")}
           onBack={() => {
             setGenError(null);
-            setStep("interests");
+            setStep(path === "story" ? "profile" : "interests");
           }}
         />
       )}
       {step === "feedback" && (
         <FeedbackScreen
+          progressSteps={storyProgress}
           onSubmit={async (rating, comment) => {
             await apiClient("/feedback", {
               method: "POST",

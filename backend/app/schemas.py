@@ -45,6 +45,15 @@ def serialize_diets(diets: list[str]) -> str | None:
     return ", ".join(cleaned) or None
 
 
+class StoryBeatRequest(BaseModel):
+    tone: str | None = None
+    choice_ids: list[str] | None = None
+
+
+class ProfileFeedbackRequest(BaseModel):
+    vote: Literal["up", "down"]
+
+
 class FeedbackCreate(BaseModel):
     rating: int = Field(ge=1, le=5)
     comment: str | None = None

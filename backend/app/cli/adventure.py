@@ -10,14 +10,15 @@ from app.services.story import (
     STORY_GENRES,
     STORY_TURNS,
     HolidayProfile,
+    StoryChoice,
     StoryError,
     StoryEvent,
     StoryTurn,
     generate_holiday_profile,
-    generate_turn,
     parse_choice_input,
     resolve_genre,
 )
+from app.services.story_bank import beat_for, is_stocked, stocked_genres
 
 
 def _width() -> int:
@@ -34,8 +35,26 @@ def _print_wrapped(text: str) -> None:
 
 def _print_themes() -> None:
     print("Choose one theme:")
+    stocked = set(stocked_genres())
     for index, genre in enumerate(STORY_GENRES, start=1):
-        print(f"  {index}. {genre}")
+        suffix = "" if genre in stocked else " (not yet written)"
+        print(f"  {index}. {genre}{suffix}")
+
+
+def _turn_from_beat(beat: dict) -> StoryTurn:
+    choices = [
+        StoryChoice(
+            id=str(option["id"]),
+            text=str(option["label"]),
+            value=str(option["value"]),
+        )
+        for option in beat.get("options") or []
+    ]
+    return StoryTurn(
+        scene=str(beat.get("narrative_text") or ""),
+        field=str(beat.get("field") or ""),
+        choices=choices,
+    )
 
 
 def _print_turn(turn: StoryTurn, turn_number: int) -> None:
@@ -61,9 +80,9 @@ def _print_profile(profile: HolidayProfile) -> None:
 def _read_theme(passed: str | None) -> str:
     if passed:
         matched = resolve_genre(passed)
-        if matched:
+        if matched and is_stocked(matched):
             return matched
-        print(f"Unknown theme {passed!r}. Choose from the list.")
+        print(f"Unknown or unstocked theme {passed!r}. Choose from the list.")
     print("A 5-beat story. First pick one theme. Then five choices, then a holiday profile.")
     while True:
         _print_themes()
@@ -72,9 +91,12 @@ def _read_theme(passed: str | None) -> str:
             print("Pick one theme only.")
             continue
         matched = resolve_genre(raw)
-        if matched:
+        if matched and is_stocked(matched):
             return matched
-        print("Enter a single number from 1 to 11.")
+        if matched:
+            print("That genre does not have a story yet.")
+            continue
+        print("Enter a stocked theme: Fantasy, Mystery, Sci-Fi, or Western.")
 
 
 def _call_agent(label: str, fn):
@@ -90,27 +112,14 @@ def _call_agent(label: str, fn):
 
 def play(genre: str) -> None:
     history: list[StoryEvent] = []
-    selected: list[str] | None = None
     print()
     _print_wrapped(f"Theme: {genre}")
     print(f"{STORY_TURNS} beats, then a holiday profile.")
     print("Type q to quit. You can pick several choices at once.")
 
     for turn_number in range(1, STORY_TURNS + 1):
-        current = turn_number
-        prior_history = list(history)
-        prior_selected = selected
-
-        def _next_turn(
-            n: int = current,
-            hist: list[StoryEvent] = prior_history,
-            sel: list[str] | None = prior_selected,
-        ) -> StoryTurn:
-            return generate_turn(genre, history=hist, selected=sel, turn_number=n)
-
-        turn = _call_agent("beat", _next_turn)
-        if turn is None:
-            return
+        beat = beat_for(genre, turn_number, "your destination")
+        turn = _turn_from_beat(beat)
         _print_turn(turn, turn_number)
 
         quit_early = False

@@ -167,3 +167,146 @@ def test_generate_holiday_profile_matches_example_shape():
     assert profile.to_dict() == payload
     assert "example JSON shape" in llm.prompts[0]
     assert "Unhurried" in llm.prompts[0]
+    assert "Dates: unknown" in llm.prompts[0]
+
+
+def test_generate_holiday_profile_includes_destination_and_dates():
+    payload = {
+        "pace": "Unhurried",
+        "company": "Solo",
+        "setting": "Paris",
+        "comfort": "Simple",
+        "food": "Markets",
+        "adventure": "Walks",
+        "assumptions": ["They linger."],
+        "holiday": "A slow week in Paris.",
+    }
+    llm = ScriptedLLM([AIMessage(content=json.dumps(payload))])
+    generate_holiday_profile(
+        "Fantasy",
+        [
+            StoryEvent(
+                scene="A path splits.",
+                field="pace",
+                selected=["Take the quiet lane"],
+                values=["Unhurried"],
+            )
+        ],
+        llm_factory=lambda: llm,
+        destination="Paris, France",
+        dates={"start": "2026-08-17", "end": "2026-08-19"},
+    )
+    prompt = llm.prompts[0]
+    assert "Paris, France" in prompt
+    assert "2026-08-17" in prompt
+
+
+def test_extract_partial_json_string_from_incomplete_object():
+    from app.services.story import extract_partial_json_string
+
+    partial = '{"narrative_text": "The forest path splits'
+    assert extract_partial_json_string(partial, "narrative_text") == "The forest path splits"
+    complete = '{"narrative_text": "Done.", "field": "pace"}'
+    assert extract_partial_json_string(complete, "narrative_text") == "Done."
+
+
+def test_generate_turn_events_streams_narrative_then_turn():
+    from app.services.story import generate_turn_events
+
+    chunks = [
+        '{"narrative_text": "The forest',
+        ' path splits under two moons.", "field": "trip_type",',
+        ' "options": [{"label": "Walk it alone", "value": "Solo"},',
+        ' {"label": "Wait for a companion", "value": "Couple"}]}',
+    ]
+
+    class StreamingLLM:
+        def stream(self, messages):
+            for chunk in chunks:
+                yield AIMessage(content=chunk)
+
+        def invoke(self, messages):
+            raise AssertionError("invoke should not run when stream works")
+
+    events = list(
+        generate_turn_events("Fantasy", llm_factory=lambda: StreamingLLM(), turn_number=1)
+    )
+    narratives = [event.text for event in events if event.kind == "narrative"]
+    assert narratives[0] == "The forest"
+    assert narratives[-1] == "The forest path splits under two moons."
+    turns = [event.turn for event in events if event.kind == "turn"]
+    assert turns[-1] is not None
+    assert turns[-1].field == "trip_type"
+
+
+def test_story_bank_has_four_stocked_genres():
+    from app.services.story_bank import load_story_bank, stocked_genres
+
+    load_story_bank.cache_clear()
+    assert stocked_genres() == ("Fantasy", "Mystery", "Sci-Fi", "Western")
+
+
+def test_maybe_summarize_skips_short_context(monkeypatch):
+    from app.services.story import HolidayProfile, StoryEvent, maybe_summarize_story_context
+
+    called = {"n": 0}
+
+    class Boom:
+        def invoke(self, messages):
+            called["n"] += 1
+            raise AssertionError("should not summarize short context")
+
+    summary = maybe_summarize_story_context(
+        [
+            StoryEvent(
+                scene="A path splits.",
+                field="pace",
+                selected=["leisurely"],
+                values=["leisurely"],
+            )
+        ],
+        HolidayProfile(
+            pace="Unhurried",
+            company="Alone",
+            setting="Paris",
+            comfort="Simple",
+            food="Markets",
+            adventure="Walks",
+            assumptions=["They linger."],
+            holiday="A slow week in Paris.",
+        ),
+        llm_factory=lambda: Boom(),
+    )
+    assert summary is None
+    assert called["n"] == 0
+
+
+def test_maybe_summarize_fires_when_over_threshold(monkeypatch):
+    from app.services import story as story_mod
+    from app.services.story import HolidayProfile, StoryEvent, maybe_summarize_story_context
+
+    monkeypatch.setattr(story_mod, "STORY_CONTEXT_SUMMARIZE_TOKENS", 1)
+    payload = {
+        "pace": "Unhurried",
+        "company": "Alone",
+        "setting": "Paris",
+        "comfort": "Simple",
+        "food": "Markets",
+        "adventure": "Walks",
+        "assumptions": ["They linger."],
+        "holiday": "A slow week in Paris.",
+    }
+    llm = ScriptedLLM([AIMessage(content=json.dumps(payload))])
+    summary = maybe_summarize_story_context(
+        [
+            StoryEvent(
+                scene="A very long scene " * 20,
+                field="pace",
+                selected=["leisurely"],
+                values=["leisurely"],
+            )
+        ],
+        HolidayProfile(**payload),
+        llm_factory=lambda: llm,
+    )
+    assert summary["holiday"] == "A slow week in Paris."

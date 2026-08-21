@@ -161,6 +161,10 @@ DESTINATION_EXTRA_TAGS: dict[str, tuple[str, ...]] = {
 }
 
 INTEREST_CATEGORIES: dict[str, str] = {
+    "sights": "tourism.sights,heritage",
+    "food_drink": "catering",
+    "adventure": "tourism.attraction,sport",
+    "culture": "entertainment.culture,entertainment.museum",
     "street food": "catering",
     "nightlife": "catering.bar,catering.pub",
     "local markets": "commercial",
@@ -199,11 +203,30 @@ INTEREST_TTL_SECONDS = 7 * 24 * 60 * 60
 PLACES_TTL_SECONDS = 24 * 60 * 60
 ITINERARY_RATE_LIMIT = 5
 ITINERARY_RATE_WINDOW_SECONDS = 60 * 60
+STORY_RATE_LIMIT = 20
+STORY_CONTEXT_SUMMARIZE_TOKENS = 2000
+PROD_ENVIRONMENTS = frozenset({"production", "prod"})
+STORY_INTEREST_CODES = {
+    "sights": "Historic Sites",
+    "food_drink": "Street Food",
+    "adventure": "Adventure Sports",
+    "culture": "Museums",
+}
+STORY_TRIP_TYPE_CODES = {
+    "solo": "Solo",
+    "couple": "Couple",
+    "friends": "Friends",
+    "family_pet": "Family",
+}
+STORY_FIELD_ALIASES = {
+    "food_style": "food_preference",
+    "wildcard_flavor": "flavor_preference",
+}
 MAX_ITINERARY_DAYS = 14
 DEFAULT_ITINERARY_DAYS = 3
-MAX_ACTIVITIES_PER_DAY = 3
+MAX_ACTIVITIES_PER_DAY = 4
 SPECIALIST_AGENT_ROUNDS = 4
-ORCHESTRATOR_AGENT_ROUNDS = 6
+ORCHESTRATOR_AGENT_ROUNDS = 7
 
 BUDGET_LEVELS = (
     "Budget-friendly",

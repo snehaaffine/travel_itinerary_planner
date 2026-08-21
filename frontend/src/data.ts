@@ -65,3 +65,23 @@ export const MONTH_NAMES = [
 ];
 
 export const STEPS = ["search", "calendar", "travelType", "budget", "interests", "itinerary"] as const;
+
+export const STORY_GENRES = [
+  "Fantasy",
+  "Mystery",
+  "Sci-Fi",
+  "Western",
+] as const;
+
+export const STOCKED_STORY_GENRES = ["Fantasy", "Mystery", "Sci-Fi", "Western"] as const;
+
+export const STORY_STEPS = [
+  "genre",
+  "Question1",
+  "Question2",
+  "Question3",
+  "Question4",
+  "Question5",
+  "profile",
+  "itinerary",
+] as const;

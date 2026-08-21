@@ -2,12 +2,12 @@ import type { ReactNode } from "react";
 import { STEPS } from "../data";
 import type { Step } from "../types";
 
-function ProgressBar({ step }: { step: Step }) {
-  const idx = Math.max(0, STEPS.indexOf(step as (typeof STEPS)[number]));
-  const activeIdx = step === "feedback" ? STEPS.length - 1 : idx;
+function ProgressBar({ step, steps }: { step: string; steps: readonly string[] }) {
+  const idx = Math.max(0, steps.indexOf(step));
+  const activeIdx = step === "feedback" ? steps.length - 1 : idx === -1 ? 0 : idx;
   return (
     <div className="flex items-center justify-center mb-8" style={{ gap: 15 }}>
-      {STEPS.map((s, i) => (
+      {steps.map((s, i) => (
         <div
           key={s}
           className="transition-all duration-300"
@@ -33,16 +33,18 @@ export function Screen({
   nextLabel,
   nextDisabled,
   wide,
+  steps = STEPS,
 }: {
   children: ReactNode;
   title?: string;
   subtitle?: string;
-  step: Step;
+  step: Step | string;
   onBack?: () => void;
   onNext?: () => void;
   nextLabel?: string;
   nextDisabled?: boolean;
   wide?: boolean;
+  steps?: readonly string[];
 }) {
   return (
     <div className="min-h-screen flex flex-col" style={{ background: "var(--bg)" }}>
@@ -73,7 +75,7 @@ export function Screen({
         <div className="w-10" />
       </div>
 
-      <ProgressBar step={step} />
+      <ProgressBar step={step} steps={steps} />
 
       <div className={`flex-1 overflow-visible px-6 pb-4 ${wide ? "max-w-4xl mx-auto w-full" : ""}`}>
         {(title || subtitle) && (

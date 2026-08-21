@@ -1,12 +1,13 @@
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.config import get_settings
+from app.constants import STORY_CONTEXT_SUMMARIZE_TOKENS
 from app.llm.provider import get_llm_client
 from app.services.agents import message_text
 
@@ -111,6 +112,13 @@ Rules:
 - No markdown, no images, no audio
 """
 
+SUMMARIZE_AGENT_PROMPT = """Condense story-path context for an itinerary brief.
+Return ONLY valid JSON:
+{"pace":"","company":"","setting":"","comfort":"","food":"","adventure":"","assumptions":[],"holiday":""}
+Keep the six phrases short. Keep 2-4 assumptions. English only. No markdown.
+Do not invent hotels, flights, bookings, or a day-by-day itinerary.
+"""
+
 PROFILE_AGENT_PROMPT = """You infer the holiday this player would enjoy.
 You see a genre and the five story choices they made (companions, vibe,
 pace, food, flavor). Make assumptions. Do not invent hotels, flights,
@@ -137,6 +145,7 @@ Rules:
 - assumptions: 2-6 specific claims tied to what they picked
 - holiday: one or two sentences, same tone as the example
 - If choices conflict, say so in assumptions and keep the stronger pattern
+- Destination and dates may be provided; still no hotels, flights, or a day-by-day itinerary
 - No markdown
 """
 
@@ -365,7 +374,12 @@ def _history_prompt(
     return "\n".join(lines)
 
 
-def _choice_log(genre: str, history: list[StoryEvent]) -> str:
+def _choice_log(
+    genre: str,
+    history: list[StoryEvent],
+    destination: str | None = None,
+    dates: dict[str, Any] | None = None,
+) -> str:
     lines = [
         f"Genre: {genre}",
         "Match the example JSON shape exactly.",
@@ -373,27 +387,130 @@ def _choice_log(genre: str, history: list[StoryEvent]) -> str:
     ]
     if not history:
         lines.append("(none yet)")
-        return "\n".join(lines)
-    for event in history:
-        labels = "; ".join(event.selected) or "(no pick)"
-        values = "; ".join(event.values) or labels
-        lines.append(f"{event.field}: {labels} (value: {values})")
-    lines.append("Infer the holiday they want. Be specific, like the example.")
+    else:
+        for event in history:
+            labels = "; ".join(event.selected) or "(no pick)"
+            values = "; ".join(event.values) or labels
+            lines.append(f"{event.field}: {labels} (value: {values})")
+    if destination:
+        lines.append(f"Destination: {destination}")
+    if dates:
+        lines.append(f"Dates: {json.dumps(dates)}")
+    else:
+        lines.append("Dates: unknown (not collected)")
+    lines.append(
+        "Infer the holiday they want in that destination when known. "
+        "Be specific, like the example. Do not invent hotels, flights, or a day-by-day itinerary."
+    )
     return "\n".join(lines)
 
 
-def _invoke_json(llm: Any, system: str, user: str, parse: Callable[[str], Any]) -> Any:
-    messages = [SystemMessage(content=system), HumanMessage(content=user)]
-    result = llm.invoke(messages)
+StreamKind = Literal["narrative", "holiday", "turn", "profile"]
+
+
+@dataclass
+class StoryStreamEvent:
+    kind: StreamKind
+    text: str = ""
+    turn: StoryTurn | None = None
+    profile: HolidayProfile | None = None
+
+
+def extract_partial_json_string(text: str, field_name: str) -> str | None:
+    """Best-effort string value for a JSON field from a possibly incomplete object."""
+    match = re.search(rf'"{re.escape(field_name)}"\s*:\s*"', text)
+    if not match:
+        return None
+    chars: list[str] = []
+    index = match.end()
+    escapes = {"n": "\n", "t": "\t", "r": "\r", '"': '"', "\\": "\\"}
+    while index < len(text):
+        char = text[index]
+        if char == "\\" and index + 1 < len(text):
+            chars.append(escapes.get(text[index + 1], text[index + 1]))
+            index += 2
+            continue
+        if char == '"':
+            return "".join(chars)
+        chars.append(char)
+        index += 1
+    return "".join(chars)
+
+
+def _chunk_text(chunk: Any) -> str:
+    content = getattr(chunk, "content", None)
+    if content is None and isinstance(chunk, str):
+        return chunk
+    return message_text(content)
+
+
+def iter_llm_text(llm: Any, messages: list) -> Iterator[str]:
+    stream_fn = getattr(llm, "stream", None)
+    used_stream = False
+    if callable(stream_fn):
+        try:
+            for chunk in stream_fn(messages):
+                used_stream = True
+                text = _chunk_text(chunk)
+                if text:
+                    yield text
+        except NotImplementedError:
+            used_stream = False
+    if not used_stream:
+        result = llm.invoke(messages)
+        text = message_text(result.content)
+        if text:
+            yield text
+
+
+def _finalize_turn(turn: StoryTurn, turn_number: int) -> StoryTurn:
+    if len(turn.choices) < MIN_CHOICES:
+        return fallback_turn(turn_number)
+    turn.field = str(beat_spec(turn_number)["field"])
+    return turn
+
+
+def generate_turn_events(
+    theme: str,
+    history: list[StoryEvent] | None = None,
+    selected: list[str] | None = None,
+    llm_factory: Callable[[], Any] | None = None,
+    turn_number: int = 1,
+) -> Iterator[StoryStreamEvent]:
+    genre = resolve_genre(theme)
+    if not genre:
+        raise StoryError("Pick a genre from the PRD list")
+    factory = llm_factory or (lambda: get_llm_client(get_settings()))
+    llm = factory()
+    user = _history_prompt(genre, history or [], selected, turn_number)
+    messages: list = [SystemMessage(content=STORY_AGENT_PROMPT), HumanMessage(content=user)]
+    accumulated = ""
+    last_narrative = ""
+    for piece in iter_llm_text(llm, messages):
+        accumulated += piece
+        narrative = extract_partial_json_string(
+            accumulated, "narrative_text"
+        ) or extract_partial_json_string(accumulated, "scene")
+        if narrative is not None and narrative != last_narrative:
+            last_narrative = narrative
+            yield StoryStreamEvent(kind="narrative", text=narrative)
     try:
-        return parse(message_text(result.content))
+        turn = parse_story_turn(accumulated, turn_number=turn_number)
     except StoryError:
-        messages.append(result)
-        messages.append(
-            HumanMessage(content="Return only the JSON object. No markdown, no explanation.")
+        retry = llm.invoke(
+            [
+                *messages,
+                HumanMessage(content="Return only the JSON object. No markdown, no explanation."),
+            ]
         )
-        retry = llm.invoke(messages)
-        return parse(message_text(retry.content))
+        try:
+            turn = parse_story_turn(message_text(retry.content), turn_number=turn_number)
+        except StoryError:
+            turn = fallback_turn(turn_number)
+    turn = _finalize_turn(turn, turn_number)
+    if not last_narrative and turn.scene:
+        yield StoryStreamEvent(kind="narrative", text=turn.scene)
+    yield StoryStreamEvent(kind="turn", turn=turn)
 
 
 def generate_turn(
@@ -403,32 +520,113 @@ def generate_turn(
     llm_factory: Callable[[], Any] | None = None,
     turn_number: int = 1,
 ) -> StoryTurn:
-    genre = resolve_genre(theme)
-    if not genre:
-        raise StoryError("Pick a genre from the PRD list")
-    factory = llm_factory or (lambda: get_llm_client(get_settings()))
-    user = _history_prompt(genre, history or [], selected, turn_number)
-    try:
-        turn = _invoke_json(
-            factory(),
-            STORY_AGENT_PROMPT,
-            user,
-            lambda text: parse_story_turn(text, turn_number=turn_number),
-        )
-    except StoryError:
+    turn: StoryTurn | None = None
+    for event in generate_turn_events(
+        theme,
+        history=history,
+        selected=selected,
+        llm_factory=llm_factory,
+        turn_number=turn_number,
+    ):
+        if event.kind == "turn" and event.turn is not None:
+            turn = event.turn
+    if turn is None:
         return fallback_turn(turn_number)
-    if len(turn.choices) < MIN_CHOICES:
-        return fallback_turn(turn_number)
-    turn.field = str(beat_spec(turn_number)["field"])
     return turn
+
+
+def generate_holiday_profile_events(
+    theme: str,
+    history: list[StoryEvent],
+    llm_factory: Callable[[], Any] | None = None,
+    destination: str | None = None,
+    dates: dict[str, Any] | None = None,
+) -> Iterator[StoryStreamEvent]:
+    genre = resolve_genre(theme) or (theme.strip() if theme else "Fantasy")
+    factory = llm_factory or (lambda: get_llm_client(get_settings()))
+    llm = factory()
+    user = _choice_log(genre, history, destination=destination, dates=dates)
+    messages: list = [SystemMessage(content=PROFILE_AGENT_PROMPT), HumanMessage(content=user)]
+    accumulated = ""
+    last_holiday = ""
+    for piece in iter_llm_text(llm, messages):
+        accumulated += piece
+        holiday = extract_partial_json_string(accumulated, "holiday")
+        if holiday is not None and holiday != last_holiday:
+            last_holiday = holiday
+            yield StoryStreamEvent(kind="holiday", text=holiday)
+    try:
+        profile = parse_holiday_profile(accumulated)
+    except StoryError:
+        retry = llm.invoke(
+            [
+                *messages,
+                HumanMessage(content="Return only the JSON object. No markdown, no explanation."),
+            ]
+        )
+        profile = parse_holiday_profile(message_text(retry.content))
+    if not last_holiday and profile.holiday:
+        yield StoryStreamEvent(kind="holiday", text=profile.holiday)
+    yield StoryStreamEvent(kind="profile", profile=profile)
 
 
 def generate_holiday_profile(
     theme: str,
     history: list[StoryEvent],
     llm_factory: Callable[[], Any] | None = None,
+    destination: str | None = None,
+    dates: dict[str, Any] | None = None,
 ) -> HolidayProfile:
-    genre = resolve_genre(theme) or (theme.strip() if theme else "Fantasy")
+    profile: HolidayProfile | None = None
+    for event in generate_holiday_profile_events(
+        theme,
+        history,
+        llm_factory=llm_factory,
+        destination=destination,
+        dates=dates,
+    ):
+        if event.kind == "profile" and event.profile is not None:
+            profile = event.profile
+    if profile is None:
+        raise StoryError("Holiday profile missing summary")
+    return profile
+
+
+def estimate_tokens(text: str) -> int:
+    return max(1, len(text) // 4)
+
+
+def story_context_payload(
+    history: list[StoryEvent], profile: HolidayProfile | dict[str, Any]
+) -> dict[str, Any]:
+    profile_data = profile.to_dict() if isinstance(profile, HolidayProfile) else dict(profile)
+    return {
+        "answers": [
+            {
+                "field": event.field,
+                "selected": event.selected,
+                "values": event.values or event.selected,
+            }
+            for event in history
+        ],
+        "profile": profile_data,
+    }
+
+
+def maybe_summarize_story_context(
+    history: list[StoryEvent],
+    profile: HolidayProfile | dict[str, Any],
+    llm_factory: Callable[[], Any] | None = None,
+) -> dict[str, Any] | None:
+    payload = story_context_payload(history, profile)
+    raw = json.dumps(payload)
+    if estimate_tokens(raw) <= STORY_CONTEXT_SUMMARIZE_TOKENS:
+        return None
     factory = llm_factory or (lambda: get_llm_client(get_settings()))
-    user = _choice_log(genre, history)
-    return _invoke_json(factory(), PROFILE_AGENT_PROMPT, user, parse_holiday_profile)
+    llm = factory()
+    messages: list = [
+        SystemMessage(content=SUMMARIZE_AGENT_PROMPT),
+        HumanMessage(content=raw),
+    ]
+    result = llm.invoke(messages)
+    return parse_holiday_profile(message_text(result.content)).to_dict()

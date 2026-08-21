@@ -50,3 +50,37 @@ body {
 .fade-up {
   animation: fadeUp 0.5s ease both;
 }
+
+.itinerary-day-body {
+  display: grid;
+  grid-template-columns: minmax(200px, 1fr) minmax(0, 1.2fr);
+  gap: 16px 24px;
+  align-items: stretch;
+}
+
+.itinerary-day-map {
+  position: relative;
+  min-height: 280px;
+  height: 100%;
+  align-self: stretch;
+}
+
+.itinerary-day-map img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+@media (max-width: 700px) {
+  .itinerary-day-body {
+    grid-template-columns: 1fr;
+  }
+
+  .itinerary-day-map {
+    min-height: 240px;
+    order: -1;
+  }
+}

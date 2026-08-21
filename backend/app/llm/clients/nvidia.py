@@ -5,12 +5,13 @@ import httpx
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (
   AIMessage,
+  AIMessageChunk,
   BaseMessage,
   HumanMessage,
   SystemMessage,
   ToolMessage,
 )
-from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
 from app.config import Settings
 
@@ -157,3 +158,69 @@ class NvidiaChatModel(BaseChatModel):
     api_message = data["choices"][0]["message"]
     ai_message = _parse_api_message(api_message)
     return ChatResult(generations=[ChatGeneration(message=ai_message)])
+
+  def _stream(
+    self,
+    messages: list[BaseMessage],
+    stop: list[str] | None = None,
+    run_manager: Any = None,
+    **kwargs: Any,
+  ):
+    if not self.api_key:
+      raise ValueError("NVIDIA_API_KEY is required when LLM_PROVIDER=nvidia")
+
+    payload: dict[str, Any] = {
+      "model": self.model,
+      "messages": [_message_to_api_format(message) for message in messages],
+      "max_tokens": kwargs.get("max_tokens", self.max_tokens),
+      "stream": True,
+    }
+    if "tools" in kwargs:
+      payload["tools"] = kwargs["tools"]
+    if "tool_choice" in kwargs:
+      payload["tool_choice"] = kwargs["tool_choice"]
+    if "reasoning_effort" in kwargs:
+      payload["reasoning_effort"] = kwargs["reasoning_effort"]
+    elif "tools" in kwargs:
+      payload["reasoning_effort"] = "none"
+
+    timeout_seconds = kwargs.get("timeout_seconds", self.timeout_seconds)
+    timeout = httpx.Timeout(timeout_seconds)
+    headers = {
+      "Authorization": f"Bearer {self.api_key}",
+      "Content-Type": "application/json",
+    }
+    url = f"{self.base_url}/chat/completions"
+
+    try:
+      with httpx.Client(timeout=timeout) as client:
+        with client.stream("POST", url, headers=headers, json=payload) as response:
+          if response.is_error:
+            response.read()
+            detail = response.text.strip() or response.reason_phrase
+            raise ValueError(
+              f"NVIDIA API error {response.status_code} for model '{self.model}': {detail}"
+            )
+          for raw_line in response.iter_lines():
+            line = raw_line.decode() if isinstance(raw_line, bytes) else raw_line
+            line = line.strip()
+            if not line.startswith("data:"):
+              continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+              break
+            try:
+              parsed = json.loads(data)
+            except json.JSONDecodeError:
+              continue
+            choices = parsed.get("choices") or []
+            if not choices:
+              continue
+            delta = choices[0].get("delta") or {}
+            content = delta.get("content") or ""
+            if content:
+              yield ChatGenerationChunk(message=AIMessageChunk(content=content))
+    except httpx.TimeoutException as exc:
+      raise ValueError(
+        f"NVIDIA API timed out after {timeout_seconds:.0f}s for model '{self.model}'."
+      ) from exc

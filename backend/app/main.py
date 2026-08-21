@@ -7,6 +7,7 @@ from app.api.destinations import router as destinations_router
 from app.api.feedback import router as feedback_router
 from app.api.health import router as health_router
 from app.api.itinerary import router as itinerary_router
+from app.api.story import router as story_router
 from app.api.template import router as template_router
 from app.api.trips import router as trips_router
 from app.auth.app_token import AppTokenMiddleware
@@ -42,6 +43,7 @@ def create_app() -> FastAPI:
   app.include_router(destinations_router)
   app.include_router(trips_router)
   app.include_router(template_router)
+  app.include_router(story_router)
   app.include_router(itinerary_router)
   app.include_router(feedback_router)
 

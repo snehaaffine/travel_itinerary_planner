@@ -1,0 +1,286 @@
+{
+  "_notes": {
+    "purpose": "Static dummy story content for 4 genres, used as the fixed story-engine content per the updated PRD (story beats are no longer generated fresh per session — this file is the source of truth for POST /story/beat).",
+    "supersedes": "dummy_stories.json (old shape: single-select, trip_type/pace/food_preference/flavor_preference treated as raw trip-state fields). This file matches the shape actually implemented in story_flow_frontend plan: multi-select choices, no budget/diet collection, food_preference/flavor_preference feed a holiday profile rather than being stored as literal budget/diet.",
+    "genres_included": ["Fantasy", "Mystery", "Sci-Fi", "Western"],
+    "genres_not_yet_covered": ["Fairytale", "Adventure/Pirate", "Heist/Thriller", "Noir Detective", "Epic/Mythic", "Spy Thriller", "Comedy"],
+    "field_order": ["trip_type", "interests", "pace", "food_style", "wildcard_flavor"],
+    "selection_mode": "multi_select",
+    "min_selections_per_beat": 1,
+    "max_selections_per_beat": 4,
+    "value_codes": {
+      "trip_type": ["solo", "couple", "friends", "family_pet"],
+      "interests": ["sights", "food_drink", "adventure", "culture"],
+      "pace": ["leisurely", "balanced", "packed", "spontaneous_pace"],
+      "food_style": ["local_traditional", "adventurous", "fine_dining", "comfort"],
+      "wildcard_flavor": ["planned", "spontaneous", "hidden_gems", "iconic_landmarks"]
+    },
+    "note_on_field_naming": "food_style and wildcard_flavor are stored on TripState.food_preference and TripState.flavor_preference columns respectively (no schema migration), but are NEVER treated as budget or dietary-restriction fields in the itinerary brief. The orchestrator states explicitly that budget and diet were not collected for the story path.",
+    "schema_alignment": "Mirrors story_sessions.beats: beat_number, narrative_text, audio_url, field, options[{label, value, image_url}], chosen_value. chosen_value is a LIST of values (multi-select), populated at runtime from user picks — not stored here.",
+    "after_beat_5": "Beat 5 is followed by a generated holiday profile (six short phrases + assumptions), not a 6th beat. Profile generation is a separate agent call, still using dest/dates from trip_state; it is out of scope for this dummy file.",
+    "destination_placeholder": "{{destination}}",
+    "generated_as": "Dummy/static content, not model-generated. This is the fixed content used in production for v1 — see PRD Section 8 update: fresh per-session generation is no longer in scope."
+  },
+  "stories": [
+    {
+      "tone": "Fantasy",
+      "beats": [
+        {
+          "beat_number": 1,
+          "narrative_text": "The portal to {{destination}} hums with pale light. A robed gatekeeper steps forward, staff tapping the stone floor. 'State your company, traveler — who crosses the threshold with you? Speak all that apply.'",
+          "audio_url": null,
+          "field": "trip_type",
+          "options": [
+            { "label": "I walk this path alone", "value": "solo", "image_url": null },
+            { "label": "My partner and I, hand in hand", "value": "couple", "image_url": null },
+            { "label": "A fellowship of friends", "value": "friends", "image_url": null },
+            { "label": "My kin, with our loyal hound at heel", "value": "family_pet", "image_url": null }
+          ]
+        },
+        {
+          "beat_number": 2,
+          "narrative_text": "Beyond the gate, roads fork through the realm of {{destination}}. The gatekeeper watches to see which call to you — you may follow more than one.",
+          "audio_url": null,
+          "field": "interests",
+          "options": [
+            { "label": "The road to ancient towers and monuments", "value": "sights", "image_url": null },
+            { "label": "The road to feasting halls and market stalls", "value": "food_drink", "image_url": null },
+            { "label": "The road to untamed wilds and adventure", "value": "adventure", "image_url": null },
+            { "label": "The road to old libraries and forgotten lore", "value": "culture", "image_url": null }
+          ]
+        },
+        {
+          "beat_number": 3,
+          "narrative_text": "A weathered mapmaker offers to chart your journey. 'How shall we ride, traveler? Name every pace that suits you.'",
+          "audio_url": null,
+          "field": "pace",
+          "options": [
+            { "label": "Slowly — let the land reveal itself", "value": "leisurely", "image_url": null },
+            { "label": "At a steady, even gallop", "value": "balanced", "image_url": null },
+            { "label": "Full speed, banner to the wind", "value": "packed", "image_url": null },
+            { "label": "Wherever the wind carries us", "value": "spontaneous_pace", "image_url": null }
+          ]
+        },
+        {
+          "beat_number": 4,
+          "narrative_text": "Smoke curls from a tavern hearth ahead. The innkeeper calls out, ladle in hand. 'What fare suits a traveler such as yourself? Choose as many as tempt you.'",
+          "audio_url": null,
+          "field": "food_style",
+          "options": [
+            { "label": "The realm's own hearty, traditional fare", "value": "local_traditional", "image_url": null },
+            { "label": "Whatever strange delicacy the cook dares serve", "value": "adventurous", "image_url": null },
+            { "label": "A feast fit for a lord's table", "value": "fine_dining", "image_url": null },
+            { "label": "Something warm and familiar", "value": "comfort", "image_url": null }
+          ]
+        },
+        {
+          "beat_number": 5,
+          "narrative_text": "The mapmaker rolls up the last of the parchment. 'One final question, before the road takes you — what shape does your journey favor? Mark all that ring true.'",
+          "audio_url": null,
+          "field": "wildcard_flavor",
+          "options": [
+            { "label": "A course charted true, step by step", "value": "planned", "image_url": null },
+            { "label": "An open road, fate deciding the rest", "value": "spontaneous", "image_url": null },
+            { "label": "The hidden paths few travelers find", "value": "hidden_gems", "image_url": null },
+            { "label": "The great, storied landmarks of legend", "value": "iconic_landmarks", "image_url": null }
+          ]
+        }
+      ]
+    },
+    {
+      "tone": "Mystery",
+      "beats": [
+        {
+          "beat_number": 1,
+          "narrative_text": "A telegram arrives, ink still damp: 'Come to {{destination}} at once.' The station platform is nearly empty. A figure in a grey coat waits by the ticket booth. 'Who's working this case with you? Name them all.'",
+          "audio_url": null,
+          "field": "trip_type",
+          "options": [
+            { "label": "Just me and my notebook", "value": "solo", "image_url": null },
+            { "label": "My partner in crime-solving", "value": "couple", "image_url": null },
+            { "label": "A small circle of trusted friends", "value": "friends", "image_url": null },
+            { "label": "The whole family, plus the family dog", "value": "family_pet", "image_url": null }
+          ]
+        },
+        {
+          "beat_number": 2,
+          "narrative_text": "The grey-coated figure slides a folder across the counter — leads scattered across {{destination}}. 'Which threads do we pull? Pick as many as you like.'",
+          "audio_url": null,
+          "field": "interests",
+          "options": [
+            { "label": "The landmark where the witness was last seen", "value": "sights", "image_url": null },
+            { "label": "The café where the informants gather", "value": "food_drink", "image_url": null },
+            { "label": "The docks — dangerous, but promising", "value": "adventure", "image_url": null },
+            { "label": "The archive holding the case's history", "value": "culture", "image_url": null }
+          ]
+        },
+        {
+          "beat_number": 3,
+          "narrative_text": "A clock ticks somewhere unseen. Time is a variable in this case — how do you want to work it? Choose every pace that fits.",
+          "audio_url": null,
+          "field": "pace",
+          "options": [
+            { "label": "Careful, deliberate, no detail missed", "value": "leisurely", "image_url": null },
+            { "label": "A steady, methodical pace", "value": "balanced", "image_url": null },
+            { "label": "Racing the clock, lead to lead", "value": "packed", "image_url": null },
+            { "label": "Following instinct wherever it points", "value": "spontaneous_pace", "image_url": null }
+          ]
+        },
+        {
+          "beat_number": 4,
+          "narrative_text": "A waiter slides a menu across a rain-streaked table, low light flickering above. 'The usual, or something else tonight?' Order as much as you're curious about.",
+          "audio_url": null,
+          "field": "food_style",
+          "options": [
+            { "label": "The house specialty — locals swear by it", "value": "local_traditional", "image_url": null },
+            { "label": "Whatever's unusual on tonight's menu", "value": "adventurous", "image_url": null },
+            { "label": "Something upscale — this is a good table", "value": "fine_dining", "image_url": null },
+            { "label": "Something familiar, to steady the nerves", "value": "comfort", "image_url": null }
+          ]
+        },
+        {
+          "beat_number": 5,
+          "narrative_text": "The grey-coated figure taps ash from a cigarette. 'Last thing — how do detectives like you tend to work? Mark every style that's true.'",
+          "audio_url": null,
+          "field": "wildcard_flavor",
+          "options": [
+            { "label": "Always a plan — every angle covered", "value": "planned", "image_url": null },
+            { "label": "I improvise — the case rewrites itself anyway", "value": "spontaneous", "image_url": null },
+            { "label": "I follow the leads no one else notices", "value": "hidden_gems", "image_url": null },
+            { "label": "I start with the obvious suspects — the landmarks", "value": "iconic_landmarks", "image_url": null }
+          ]
+        }
+      ]
+    },
+    {
+      "tone": "Sci-Fi",
+      "beats": [
+        {
+          "beat_number": 1,
+          "narrative_text": "The shuttle's cabin lights flicker as {{destination}} rotates into view through the viewport. The onboard AI chimes softly. 'Manifest check — who's on this transport with you? List everyone.'",
+          "audio_url": null,
+          "field": "trip_type",
+          "options": [
+            { "label": "Solo passenger, manifest of one", "value": "solo", "image_url": null },
+            { "label": "My co-pilot and me", "value": "couple", "image_url": null },
+            { "label": "A crew of close friends", "value": "friends", "image_url": null },
+            { "label": "Family unit, plus one bio-companion (pet)", "value": "family_pet", "image_url": null }
+          ]
+        },
+        {
+          "beat_number": 2,
+          "narrative_text": "The AI projects a holographic map of {{destination}}, its sectors glowing. 'Select sectors for reconnaissance — multiple selections permitted.'",
+          "audio_url": null,
+          "field": "interests",
+          "options": [
+            { "label": "The observation towers and skyline", "value": "sights", "image_url": null },
+            { "label": "The nutrient bazaar and food synth district", "value": "food_drink", "image_url": null },
+            { "label": "The unmapped outer perimeter", "value": "adventure", "image_url": null },
+            { "label": "The archive core and history banks", "value": "culture", "image_url": null }
+          ]
+        },
+        {
+          "beat_number": 3,
+          "narrative_text": "'Setting transit velocity,' the AI announces. 'How should I calibrate our exploration speed? You may select more than one profile.'",
+          "audio_url": null,
+          "field": "pace",
+          "options": [
+            { "label": "Low velocity — full sensor sweep", "value": "leisurely", "image_url": null },
+            { "label": "Standard cruising speed", "value": "balanced", "image_url": null },
+            { "label": "Maximum thrust, sector to sector", "value": "packed", "image_url": null },
+            { "label": "Adaptive — recalculate as we go", "value": "spontaneous_pace", "image_url": null }
+          ]
+        },
+        {
+          "beat_number": 4,
+          "narrative_text": "A nutrient dispenser hums to life in the galley. 'Ration protocol requested. Specify all acceptable preferences.'",
+          "audio_url": null,
+          "field": "food_style",
+          "options": [
+            { "label": "Native cuisine, unmodified", "value": "local_traditional", "image_url": null },
+            { "label": "Experimental synth-dishes, unknown flavor profiles", "value": "adventurous", "image_url": null },
+            { "label": "Premium replicated tasting menu", "value": "fine_dining", "image_url": null },
+            { "label": "Standard comfort rations", "value": "comfort", "image_url": null }
+          ]
+        },
+        {
+          "beat_number": 5,
+          "narrative_text": "The AI's core light pulses once. 'Final parameter: how should navigation behave? Select every mode you'd accept.'",
+          "audio_url": null,
+          "field": "wildcard_flavor",
+          "options": [
+            { "label": "Lock the flight path — precision matters", "value": "planned", "image_url": null },
+            { "label": "Leave it open — let the mission adapt", "value": "spontaneous", "image_url": null },
+            { "label": "Chart the unlisted, unregistered coordinates", "value": "hidden_gems", "image_url": null },
+            { "label": "Prioritize the recognized landmark beacons", "value": "iconic_landmarks", "image_url": null }
+          ]
+        }
+      ]
+    },
+    {
+      "tone": "Western",
+      "beats": [
+        {
+          "beat_number": 1,
+          "narrative_text": "Dust settles as the stagecoach rolls into {{destination}}. The sheriff leans against the saloon post, thumbs in his belt. 'Who's ridin' with you, stranger? Name 'em all.'",
+          "audio_url": null,
+          "field": "trip_type",
+          "options": [
+            { "label": "Just me and my horse", "value": "solo", "image_url": null },
+            { "label": "Me and my partner", "value": "couple", "image_url": null },
+            { "label": "A posse of good friends", "value": "friends", "image_url": null },
+            { "label": "The whole family, dog included", "value": "family_pet", "image_url": null }
+          ]
+        },
+        {
+          "beat_number": 2,
+          "narrative_text": "The sheriff nods toward the roads leading out of town. 'Which way you headed? Pick as many trails as you please.'",
+          "audio_url": null,
+          "field": "interests",
+          "options": [
+            { "label": "Up to the old lookout point", "value": "sights", "image_url": null },
+            { "label": "Down to the saloon and chuckwagon row", "value": "food_drink", "image_url": null },
+            { "label": "Out toward the canyon trails", "value": "adventure", "image_url": null },
+            { "label": "Over to the old town museum", "value": "culture", "image_url": null }
+          ]
+        },
+        {
+          "beat_number": 3,
+          "narrative_text": "The stable hand saddles up. 'How hard you wanna ride, partner? Tell me every gait you're good with.'",
+          "audio_url": null,
+          "field": "pace",
+          "options": [
+            { "label": "Slow trot, take in the scenery", "value": "leisurely", "image_url": null },
+            { "label": "Steady, even pace", "value": "balanced", "image_url": null },
+            { "label": "Full gallop, sunup to sundown", "value": "packed", "image_url": null },
+            { "label": "However the trail takes us", "value": "spontaneous_pace", "image_url": null }
+          ]
+        },
+        {
+          "beat_number": 4,
+          "narrative_text": "The chuckwagon cook bangs a ladle on the pot. 'What'll it be, stranger? Load up your plate with whatever suits.'",
+          "audio_url": null,
+          "field": "food_style",
+          "options": [
+            { "label": "The old ranch classics", "value": "local_traditional", "image_url": null },
+            { "label": "Whatever's cookin' that I ain't tried", "value": "adventurous", "image_url": null },
+            { "label": "The good stuff, saved for payday", "value": "fine_dining", "image_url": null },
+            { "label": "Somethin' simple and hearty", "value": "comfort", "image_url": null }
+          ]
+        },
+        {
+          "beat_number": 5,
+          "narrative_text": "The sheriff tips his hat as you mount up. 'One last thing — how do you like to ride into the unknown? Mark every way that's true to you.'",
+          "audio_url": null,
+          "field": "wildcard_flavor",
+          "options": [
+            { "label": "A plan, mapped out proper", "value": "planned", "image_url": null },
+            { "label": "Let the trail decide", "value": "spontaneous", "image_url": null },
+            { "label": "The trails most folks don't ride", "value": "hidden_gems", "image_url": null },
+            { "label": "The landmarks this town's known for", "value": "iconic_landmarks", "image_url": null }
+          ]
+        }
+      ]
+    }
+  ]
+}

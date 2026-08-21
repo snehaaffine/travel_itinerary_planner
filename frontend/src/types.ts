@@ -1,6 +1,10 @@
 export type Step =
   | "search"
   | "calendar"
+  | "path"
+  | "genre"
+  | "story"
+  | "profile"
   | "travelType"
   | "interests"
   | "budget"
@@ -44,6 +48,7 @@ export type ItineraryDay = {
   activities?: ItineraryActivity[];
   items?: ItineraryActivity[];
   meals?: ItineraryMeal[];
+  map_image_url?: string | null;
 };
 
 export type ItineraryContent = {
@@ -52,4 +57,29 @@ export type ItineraryContent = {
   days: ItineraryDay[];
   notes?: string;
   interestSummary?: string;
+  map_image_url?: string | null;
+};
+
+export type StoryOption = {
+  id: string;
+  label: string;
+  value: string;
+};
+
+export type StoryBeat = {
+  beat_number: number;
+  narrative_text: string;
+  field: string;
+  options: StoryOption[];
+};
+
+export type HolidayProfile = {
+  pace: string;
+  company: string;
+  setting: string;
+  comfort: string;
+  food: string;
+  adventure: string;
+  assumptions: string[];
+  holiday: string;
 };

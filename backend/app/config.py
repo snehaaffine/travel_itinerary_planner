@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
+    # Runtime
+    app_env: str = "development"
+
     # Auth
     app_api_token: str = "dev-app-token"
     session_secret: str = "dev-session-secret-change-in-production"
@@ -47,6 +50,12 @@ class Settings(BaseSettings):
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @property
+    def rate_limits_enabled(self) -> bool:
+        from app.constants import PROD_ENVIRONMENTS
+
+        return self.app_env.strip().lower() in PROD_ENVIRONMENTS
 
 
 def get_settings() -> Settings:

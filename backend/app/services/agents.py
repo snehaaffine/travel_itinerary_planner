@@ -44,7 +44,8 @@ def run_tool_agent(
 ) -> AgentRun:
     """Run an LLM that may call its own tools, then return the final briefing."""
     tool_map = {tool.name: tool for tool in tools}
-    bound = (llm or get_llm_client(get_settings())).bind_tools(tools)
+    client = llm or get_llm_client(get_settings())
+    bound = client.bind_tools(tools)
     messages: list = [
         SystemMessage(content=system),
         HumanMessage(content=user),
@@ -59,7 +60,17 @@ def run_tool_agent(
         for tool_call, output in _invoke_tool_calls(tool_map, tool_calls):
             messages.append(ToolMessage(content=str(output), tool_call_id=tool_call["id"]))
 
-    raise AgentError("Agent did not finish after tool calls")
+    messages.append(
+        HumanMessage(
+            content="Do not call tools. Return the final answer now using the tool results."
+        )
+    )
+    result = client.invoke(messages)
+    messages.append(result)
+    text = message_text(result.content).strip()
+    if not text:
+        raise AgentError("Agent did not finish after tool calls")
+    return AgentRun(text=text, messages=messages, llm=bound)
 
 
 def _invoke_tool_calls(
